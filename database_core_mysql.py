@@ -1,0 +1,729 @@
+import mysql.connector
+from mysql.connector import Error
+import json
+import pickle
+from datetime import datetime, date
+import os
+from typing import Optional, List, Dict, Any
+
+class MySQLAttendanceDatabase:
+    """MySQL database implementation for advanced attendance system"""
+    
+    def __init__(self, host='localhost', database='attendance_system', 
+                 user='root', password='', port=3306):
+        self.connection_params = {
+            'host': host,
+            'database': database,
+            'user': user,
+            'password': password,
+            'port': port,
+            'autocommit': True,
+            'charset': 'utf8mb4',
+            'collation': 'utf8mb4_unicode_ci'
+        }
+        self.init_database()
+    
+    def get_connection(self):
+        """Get database connection"""
+        try:
+            return mysql.connector.connect(**self.connection_params)
+        except Error as e:
+            print(f"Database connection error: {e}")
+            raise
+    
+    def init_database(self):
+        """Initialize MySQL database and tables"""
+        try:
+            # Connect without database first to create it
+            temp_params = self.connection_params.copy()
+            db_name = temp_params.pop('database')
+            
+            conn = mysql.connector.connect(**temp_params)
+            cursor = conn.cursor()
+            
+            # Create database if not exists
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cursor.execute(f"USE {db_name}")
+            
+            # Create tables
+            self._create_students_table(cursor)
+            self._create_attendance_table(cursor)
+            self._create_face_data_table(cursor)
+            self._create_unknown_faces_table(cursor)
+            self._create_lecture_sessions_table(cursor)
+            self._create_lecture_attendance_table(cursor)
+            self._create_attendance_alerts_table(cursor)
+            self._create_emotion_analytics_table(cursor)
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            print("MySQL database initialized successfully!")
+            
+        except Error as e:
+            print(f"Database initialization error: {e}")
+            raise
+    
+    def _create_students_table(self, cursor):
+        """Create students table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS students (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                face_encoding LONGBLOB,
+                image_path VARCHAR(500),
+                status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_name (name),
+                INDEX idx_status (status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_attendance_table(self, cursor):
+        """Create enhanced attendance table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS attendance (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                date DATE NOT NULL,
+                time TIME NOT NULL,
+                image_path VARCHAR(500),
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                emotion VARCHAR(50),
+                emotion_confidence DECIMAL(5,4),
+                spoofing_score DECIMAL(5,4),
+                is_real_face BOOLEAN DEFAULT TRUE,
+                lecture_id VARCHAR(100),
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                UNIQUE KEY unique_student_date (student_id, date),
+                INDEX idx_date (date),
+                INDEX idx_student_id (student_id),
+                INDEX idx_lecture_id (lecture_id),
+                INDEX idx_emotion (emotion)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_face_data_table(self, cursor):
+        """Create face data table for multiple encodings"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS face_data (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT NOT NULL,
+                face_encoding LONGBLOB NOT NULL,
+                image_path VARCHAR(500),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_primary BOOLEAN DEFAULT FALSE,
+                quality_score DECIMAL(5,4) DEFAULT 0.8000,
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                INDEX idx_student_id (student_id),
+                INDEX idx_is_primary (is_primary)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_unknown_faces_table(self, cursor):
+        """Create unknown faces table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS unknown_faces (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                image_path VARCHAR(500) NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                face_encoding LONGBLOB,
+                processed BOOLEAN DEFAULT FALSE,
+                notes TEXT,
+                INDEX idx_timestamp (timestamp),
+                INDEX idx_processed (processed)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_lecture_sessions_table(self, cursor):
+        """Create lecture sessions table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS lecture_sessions (
+                id VARCHAR(100) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                course_code VARCHAR(50),
+                instructor VARCHAR(255),
+                start_time TIMESTAMP NOT NULL,
+                end_time TIMESTAMP NULL,
+                total_attendees INT DEFAULT 0,
+                engagement_score DECIMAL(5,4) DEFAULT 0.0000,
+                emotions_summary JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_start_time (start_time),
+                INDEX idx_course_code (course_code)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_lecture_attendance_table(self, cursor):
+        """Create lecture attendance table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS lecture_attendance (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                lecture_id VARCHAR(100) NOT NULL,
+                student_id INT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                emotion VARCHAR(50),
+                emotion_confidence DECIMAL(5,4),
+                FOREIGN KEY (lecture_id) REFERENCES lecture_sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                INDEX idx_lecture_id (lecture_id),
+                INDEX idx_student_id (student_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_attendance_alerts_table(self, cursor):
+        """Create attendance alerts table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS attendance_alerts (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                alert_type VARCHAR(50) NOT NULL,
+                message TEXT NOT NULL,
+                student_id INT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                acknowledged BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL,
+                INDEX idx_timestamp (timestamp),
+                INDEX idx_alert_type (alert_type),
+                INDEX idx_acknowledged (acknowledged)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    def _create_emotion_analytics_table(self, cursor):
+        """Create emotion analytics table"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS emotion_analytics (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                student_id INT,
+                date DATE NOT NULL,
+                time TIME NOT NULL,
+                emotion VARCHAR(50) NOT NULL,
+                confidence DECIMAL(5,4),
+                context VARCHAR(100),
+                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                INDEX idx_student_id (student_id),
+                INDEX idx_date (date),
+                INDEX idx_emotion (emotion)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+    
+    # Student management methods
+    def add_student_advanced(self, name: str, face_encoding: Any, image_path: Optional[str] = None, 
+                           notes: Optional[str] = None) -> Optional[int]:
+        """Add student with enhanced features"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                encoding_blob = pickle.dumps(face_encoding)
+                
+                # Insert or update student
+                cursor.execute('''
+                    INSERT INTO students (name, face_encoding, image_path, notes)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                    face_encoding = VALUES(face_encoding),
+                    image_path = VALUES(image_path),
+                    notes = VALUES(notes),
+                    updated_at = CURRENT_TIMESTAMP
+                ''', (name, encoding_blob, image_path, notes))
+                
+                # Get student ID
+                cursor.execute('SELECT id FROM students WHERE name = %s', (name,))
+                student_id = cursor.fetchone()[0]
+                
+                # Add to face_data table as primary encoding
+                cursor.execute('''
+                    INSERT INTO face_data (student_id, face_encoding, image_path, is_primary, quality_score)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (student_id, encoding_blob, image_path, True, 0.8))
+                
+                return student_id
+                
+        except Error as e:
+            print(f"Error adding student: {e}")
+            return None
+    
+    def get_all_students(self) -> List[Dict]:
+        """Get all students with their face encodings"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, face_encoding, image_path, status, notes, created_at, updated_at
+                    FROM students 
+                    WHERE status = 'active'
+                    ORDER BY name
+                ''')
+                
+                students = []
+                for row in cursor.fetchall():
+                    students.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'face_encoding': pickle.loads(row['face_encoding']) if row['face_encoding'] else None,
+                        'image_path': row['image_path'],
+                        'status': row['status'],
+                        'notes': row['notes'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at']
+                    })
+                
+                return students
+                
+        except Error as e:
+            print(f"Error getting students: {e}")
+            return []
+    
+    def get_student_by_name(self, name: str) -> Optional[Dict]:
+        """Get student by name with full details"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, face_encoding, image_path, status, notes, created_at, updated_at
+                    FROM students 
+                    WHERE name = %s AND status = 'active'
+                ''', (name,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row['id'],
+                        'name': row['name'],
+                        'face_encoding': pickle.loads(row['face_encoding']) if row['face_encoding'] else None,
+                        'image_path': row['image_path'],
+                        'status': row['status'],
+                        'notes': row['notes'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at']
+                    }
+                return None
+                
+        except Error as e:
+            print(f"Error getting student by name: {e}")
+            return None
+    
+    def update_student_status(self, student_id: int, status: str, notes: Optional[str] = None) -> bool:
+        """Update student status and notes"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE students 
+                    SET status = %s, notes = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                ''', (status, notes, student_id))
+                return cursor.rowcount > 0
+        except Error as e:
+            print(f"Error updating student status: {e}")
+            return False
+    
+    # Attendance methods
+    def mark_attendance_advanced(self, student_id: int, date_str: str, time_str: str, 
+                              image_path: Optional[str] = None, emotion: Optional[str] = None,
+                              emotion_confidence: Optional[float] = None, 
+                              spoofing_score: Optional[float] = None,
+                              is_real_face: Optional[bool] = None, 
+                              lecture_id: Optional[str] = None) -> tuple[bool, str]:
+        """Mark attendance with advanced features"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Check if attendance already exists
+                cursor.execute('''
+                    SELECT id FROM attendance 
+                    WHERE student_id = %s AND date = %s
+                ''', (student_id, date_str))
+                
+                if cursor.fetchone():
+                    return False, f"Attendance already marked for {date_str}"
+                
+                # Insert attendance record
+                cursor.execute('''
+                    INSERT INTO attendance 
+                    (student_id, date, time, image_path, emotion, emotion_confidence, 
+                     spoofing_score, is_real_face, lecture_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (student_id, date_str, time_str, image_path, emotion, 
+                       emotion_confidence, spoofing_score, is_real_face, lecture_id))
+                
+                # Record emotion analytics if available
+                if emotion:
+                    cursor.execute('''
+                        INSERT INTO emotion_analytics 
+                        (student_id, date, time, emotion, confidence, context)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    ''', (student_id, date_str, time_str, emotion, emotion_confidence, 'attendance'))
+                
+                return True, "Attendance marked successfully"
+                
+        except Error as e:
+            print(f"Error marking attendance: {e}")
+            return False, f"Error marking attendance: {e}"
+    
+    def get_attendance_with_emotions(self, date_str: str) -> List[Dict]:
+        """Get attendance with emotion data"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT s.name, a.time, a.image_path, a.timestamp, a.emotion, 
+                           a.emotion_confidence, a.spoofing_score, a.is_real_face
+                    FROM attendance a
+                    JOIN students s ON a.student_id = s.id
+                    WHERE a.date = %s
+                    ORDER BY a.time
+                ''', (date_str,))
+                
+                return list(cursor.fetchall())
+                
+        except Error as e:
+            print(f"Error getting attendance with emotions: {e}")
+            return []
+    
+    def get_attendance_by_date_range(self, start_date: str, end_date: str) -> List[Dict]:
+        """Get attendance records for a date range"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT s.name, a.date, a.time, a.image_path, a.timestamp, a.emotion
+                    FROM attendance a
+                    JOIN students s ON a.student_id = s.id
+                    WHERE a.date BETWEEN %s AND %s
+                    ORDER BY a.date, a.time
+                ''', (start_date, end_date))
+                
+                return list(cursor.fetchall())
+                
+        except Error as e:
+            print(f"Error getting attendance by date range: {e}")
+            return []
+    
+    # Unknown faces methods
+    def add_unknown_face(self, image_path: str, face_encoding: Optional[Any] = None, 
+                        notes: Optional[str] = None) -> Optional[int]:
+        """Add unknown face record"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                encoding_blob = pickle.dumps(face_encoding) if face_encoding else None
+                
+                cursor.execute('''
+                    INSERT INTO unknown_faces (image_path, face_encoding, notes)
+                    VALUES (%s, %s, %s)
+                ''', (image_path, encoding_blob, notes))
+                
+                return cursor.lastrowid
+                
+        except Error as e:
+            print(f"Error adding unknown face: {e}")
+            return None
+    
+    def get_unknown_faces(self, limit: int = 20) -> List[Dict]:
+        """Get recent unknown faces"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, image_path, timestamp, processed, notes
+                    FROM unknown_faces
+                    ORDER BY timestamp DESC
+                    LIMIT %s
+                ''', (limit,))
+                
+                return list(cursor.fetchall())
+                
+        except Error as e:
+            print(f"Error getting unknown faces: {e}")
+            return []
+    
+    # Lecture methods
+    def create_lecture_session(self, lecture_id: str, name: str, course_code: str, instructor: str) -> bool:
+        """Create new lecture session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO lecture_sessions (id, name, course_code, instructor, start_time)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (lecture_id, name, course_code, instructor, datetime.now()))
+                
+                return True
+                
+        except Error as e:
+            print(f"Error creating lecture session: {e}")
+            return False
+    
+    def end_lecture_session(self, lecture_id: str, engagement_score: Optional[float] = None, 
+                           emotions_summary: Optional[Dict] = None) -> bool:
+        """End lecture session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                emotions_json = json.dumps(emotions_summary) if emotions_summary else None
+                
+                cursor.execute('''
+                    UPDATE lecture_sessions 
+                    SET end_time = %s, engagement_score = %s, emotions_summary = %s
+                    WHERE id = %s
+                ''', (datetime.now(), engagement_score, emotions_json, lecture_id))
+                
+                return cursor.rowcount > 0
+                
+        except Error as e:
+            print(f"Error ending lecture session: {e}")
+            return False
+    
+    def get_lecture_sessions(self, limit: int = 10) -> List[Dict]:
+        """Get recent lecture sessions"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, course_code, instructor, start_time, end_time, 
+                           total_attendees, engagement_score, emotions_summary
+                    FROM lecture_sessions
+                    ORDER BY start_time DESC
+                    LIMIT %s
+                ''', (limit,))
+                
+                sessions = []
+                for row in cursor.fetchall():
+                    emotions_summary = json.loads(row['emotions_summary']) if row['emotions_summary'] else {}
+                    sessions.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'course_code': row['course_code'],
+                        'instructor': row['instructor'],
+                        'start_time': row['start_time'],
+                        'end_time': row['end_time'],
+                        'total_attendees': row['total_attendees'],
+                        'engagement_score': row['engagement_score'],
+                        'emotions_summary': emotions_summary
+                    })
+                
+                return sessions
+                
+        except Error as e:
+            print(f"Error getting lecture sessions: {e}")
+            return []
+    
+    # Alert methods
+    def create_alert(self, alert_type: str, message: str, student_id: Optional[int] = None) -> Optional[int]:
+        """Create attendance alert"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO attendance_alerts (alert_type, message, student_id)
+                    VALUES (%s, %s, %s)
+                ''', (alert_type, message, student_id))
+                
+                return cursor.lastrowid
+                
+        except Error as e:
+            print(f"Error creating alert: {e}")
+            return None
+    
+    def get_active_alerts(self) -> List[Dict]:
+        """Get unacknowledged alerts"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT aa.id, aa.alert_type, aa.message, aa.timestamp, s.name
+                    FROM attendance_alerts aa
+                    LEFT JOIN students s ON aa.student_id = s.id
+                    WHERE aa.acknowledged = FALSE
+                    ORDER BY aa.timestamp DESC
+                    LIMIT 50
+                ''')
+                
+                return list(cursor.fetchall())
+                
+        except Error as e:
+            print(f"Error getting active alerts: {e}")
+            return []
+    
+    def acknowledge_alert(self, alert_id: int) -> bool:
+        """Mark alert as acknowledged"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE attendance_alerts 
+                    SET acknowledged = TRUE
+                    WHERE id = %s
+                ''', (alert_id,))
+                
+                return cursor.rowcount > 0
+                
+        except Error as e:
+            print(f"Error acknowledging alert: {e}")
+            return False
+    
+    # Statistics and analytics methods
+    def get_comprehensive_statistics(self, start_date: str, end_date: str) -> Dict:
+        """Get comprehensive statistics for reporting"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                
+                # Basic attendance stats
+                cursor.execute('''
+                    SELECT COUNT(DISTINCT a.student_id) as total_present,
+                           COUNT(*) as total_attendance_records,
+                           AVG(a.emotion_confidence) as avg_emotion_confidence,
+                           AVG(a.spoofing_score) as avg_spoofing_score
+                    FROM attendance a
+                    WHERE a.date BETWEEN %s AND %s
+                ''', (start_date, end_date))
+                
+                basic_stats = cursor.fetchone()
+                
+                # Emotion breakdown
+                cursor.execute('''
+                    SELECT emotion, COUNT(*) as count
+                    FROM emotion_analytics
+                    WHERE date BETWEEN %s AND %s
+                    GROUP BY emotion
+                    ORDER BY count DESC
+                ''', (start_date, end_date))
+                
+                emotion_breakdown = {row['emotion']: row['count'] for row in cursor.fetchall()}
+                
+                # Lecture stats
+                cursor.execute('''
+                    SELECT COUNT(*) as total_lectures,
+                           AVG(total_attendees) as avg_attendance,
+                           AVG(engagement_score) as avg_engagement
+                    FROM lecture_sessions
+                    WHERE start_time BETWEEN %s AND %s
+                ''', (f"{start_date} 00:00:00", f"{end_date} 23:59:59"))
+                
+                lecture_stats = cursor.fetchone()
+                
+                return {
+                    'period': f"{start_date} to {end_date}",
+                    'attendance': {
+                        'total_present': basic_stats['total_present'] or 0,
+                        'total_records': basic_stats['total_attendance_records'] or 0,
+                        'avg_emotion_confidence': float(basic_stats['avg_emotion_confidence'] or 0),
+                        'avg_spoofing_score': float(basic_stats['avg_spoofing_score'] or 0)
+                    },
+                    'emotions': emotion_breakdown,
+                    'lectures': {
+                        'total_lectures': lecture_stats['total_lectures'] or 0,
+                        'avg_attendance': float(lecture_stats['avg_attendance'] or 0),
+                        'avg_engagement': float(lecture_stats['avg_engagement'] or 0)
+                    }
+                }
+                
+        except Error as e:
+            print(f"Error getting comprehensive statistics: {e}")
+            return {}
+    
+    # Migration methods
+    def migrate_from_sqlite(self, sqlite_db_path: str) -> bool:
+        """Migrate data from SQLite database"""
+        try:
+            import sqlite3
+            
+            # Connect to SQLite database
+            sqlite_conn = sqlite3.connect(sqlite_db_path)
+            sqlite_cursor = sqlite_conn.cursor()
+            
+            with self.get_connection() as mysql_conn:
+                mysql_cursor = mysql_conn.cursor()
+                
+                # Migrate students
+                sqlite_cursor.execute("SELECT id, name, face_encoding, image_path FROM students")
+                for row in sqlite_cursor.fetchall():
+                    mysql_cursor.execute('''
+                        INSERT INTO students (id, name, face_encoding, image_path)
+                        VALUES (%s, %s, %s, %s)
+                    ''', row)
+                
+                # Migrate attendance
+                sqlite_cursor.execute("SELECT student_id, date, time, image_path FROM attendance")
+                for row in sqlite_cursor.fetchall():
+                    mysql_cursor.execute('''
+                        INSERT INTO attendance (student_id, date, time, image_path)
+                        VALUES (%s, %s, %s, %s)
+                    ''', row)
+                
+                mysql_conn.commit()
+            
+            sqlite_conn.close()
+            print("Migration from SQLite to MySQL completed successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"Migration error: {e}")
+            return False
+    
+    def test_connection(self) -> bool:
+        """Test database connection"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                return True
+        except Error as e:
+            print(f"Connection test failed: {e}")
+            return False
+
+# Configuration and setup helper
+def setup_mysql_database():
+    """Setup MySQL database with user input"""
+    print("🔧 MySQL Database Setup")
+    print("=" * 30)
+    
+    # Get connection parameters
+    host = input("Enter MySQL host (default: localhost): ").strip() or 'localhost'
+    user = input("Enter MySQL username (default: root): ").strip() or 'root'
+    password = input("Enter MySQL password: ").strip()
+    database = input("Enter database name (default: attendance_system): ").strip() or 'attendance_system'
+    port = input("Enter MySQL port (default: 3306): ").strip()
+    port = int(port) if port else 3306
+    
+    try:
+        # Test connection
+        db = MySQLAttendanceDatabase(host=host, user=user, password=password, 
+                                   database=database, port=port)
+        
+        if db.test_connection():
+            print("✅ MySQL database connection successful!")
+            print(f"📊 Database '{database}' is ready for use!")
+            
+            # Ask about migration
+            if os.path.exists("attendance_system.db"):
+                migrate = input("Migrate existing SQLite data? (y/n): ").strip().lower()
+                if migrate == 'y':
+                    success = db.migrate_from_sqlite("attendance_system.db")
+                    if success:
+                        print("✅ Migration completed successfully!")
+                    else:
+                        print("❌ Migration failed!")
+            
+            return db
+        else:
+            print("❌ Connection test failed!")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Setup failed: {e}")
+        return None
+
+if __name__ == "__main__":
+    # Test the database setup
+    db = setup_mysql_database()
+    if db:
+        print("🎉 Database is ready to use!")
