@@ -1,4 +1,5 @@
-from flask import Flask, Response
+from flask import Flask, Response, jsonify
+from flasgger import Swagger
 import json
 from datetime import datetime, date, timedelta
 import os
@@ -6,6 +7,17 @@ from database_core_mysql import MySQLAttendanceDatabase
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-here'
+
+# إعداد واجهة Swagger لتوثيق الـ APIs
+swagger_template = {
+    "swagger": "2.0",
+    "info": {
+        "title": "Smart Attendance API 🤖",
+        "description": "Interactive Web Documentation for the Face Recognition Backend API.",
+        "version": "1.0.0"
+    }
+}
+Swagger(app, template=swagger_template)
 
 # Initialize MySQL database
 try:
@@ -376,9 +388,36 @@ def generate_error_html(error_message):
 </html>
     """
 
-@app.route('/api/stats')
+@app.route('/api/stats', methods=['GET'])
 def api_stats():
-    """API endpoint for statistics"""
+    """
+    Get today's attendance summary
+    ---
+    tags:
+      - Statistics API
+    responses:
+      200:
+        description: Returns a daily summary including student counts and today's date.
+        schema:
+          type: object
+          properties:
+            total_students:
+              type: integer
+              description: Total registered students in the system.
+            present_students:
+              type: integer
+              description: Number of students who attended today.
+            date:
+              type: string
+              description: Today's date in YYYY-MM-DD format.
+      500:
+        description: System Database Failure.
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+    """
     if not db:
         return jsonify({'error': 'Database connection failed'})
     
@@ -399,12 +438,14 @@ if __name__ == '__main__':
     print("🚀 Starting Final MySQL Dashboard...")
     print("📊 Connected to MySQL database")
     print("🌐 Dashboard will be available at: http://localhost:5000")
+    print("📚 API Swagger Docs available at: http://localhost:5000/apidocs")
     print("=" * 50)
     print("📱 Mobile friendly - works on phones and tablets")
     print("🔄 Auto-refresh every 30 seconds")
     print("📈 Real-time analytics from MySQL database")
     print("=" * 50)
-    print("🌐 Open your browser and go to: http://localhost:5000")
+    print("🌐 Dashboard: http://localhost:5000")
+    print("📚 Swagger UI: http://localhost:5000/apidocs")
     print("=" * 50)
     
     app.run(debug=True, host='0.0.0.0', port=5000)
