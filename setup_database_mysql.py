@@ -10,7 +10,7 @@ from database_core_mysql import MySQLAttendanceDatabase
 def print_banner():
     """Print setup banner"""
     print("=" * 60)
-    print("🔧 Advanced Face Recognition - MySQL Setup")
+    print("Advanced Face Recognition - MySQL Setup")
     print("=" * 60)
     print("This script will help you set up MySQL database for the")
     print("Advanced Face Recognition Attendance System.")
@@ -20,10 +20,10 @@ def check_mysql_driver():
     """Check if MySQL driver is installed"""
     try:
         import mysql.connector
-        print("✅ MySQL connector is installed")
+        print("MySQL connector is installed")
         return True
     except ImportError:
-        print("❌ MySQL connector is not installed")
+        print("MySQL connector is not installed")
         print("Please install it with: pip install mysql-connector-python")
         return False
 
@@ -43,7 +43,7 @@ def install_requirements():
         print(f"Installing {package}...")
         os.system(f"pip install {package}")
     
-    print("✅ All packages installed successfully!")
+    print("All packages installed successfully!")
 
 def test_mysql_connection():
     """Test MySQL connection with user input"""
@@ -64,7 +64,7 @@ def test_mysql_connection():
             database=database,
             port=port
         )
-        print("✅ MySQL connection successful!")
+        print("MySQL connection successful!")
         return db, {
             'host': host,
             'user': user,
@@ -73,7 +73,7 @@ def test_mysql_connection():
             'port': port
         }
     except Exception as e:
-        print(f"❌ Connection failed: {e}")
+        print(f"Connection failed: {e}")
         print("💡 Using default XAMPP settings...")
         print("   Host: localhost")
         print("   User: root")
@@ -93,7 +93,7 @@ MYSQL_DATABASE = "{database}"
 MYSQL_PORT = {port}
 
 # Use this configuration in your application
-from database_mysql import MySQLAttendanceDatabase
+from database_core_mysql import MySQLAttendanceDatabase
 
 db = MySQLAttendanceDatabase(
     host=MYSQL_HOST,
@@ -104,17 +104,17 @@ db = MySQLAttendanceDatabase(
 )
 """
     
-    with open('mysql_config.py', 'w') as f:
+    with open('mysql_config.py', 'w', encoding='utf-8') as f:
         f.write(config_content)
     
-    print("✅ Configuration saved to 'mysql_config.py'")
+    print("Configuration saved to 'mysql_config.py'")
 
 def migrate_existing_data():
     """Migrate existing SQLite data to MySQL"""
     if os.path.exists("attendance_system.db"):
         migrate = input("\n Found SQLite database. Migrate to MySQL? (y/n): ").strip().lower()
         if migrate == 'y':
-            print("🔄 Migrating SQLite data to MySQL...")
+            print("Migrating SQLite data to MySQL...")
             
             try:
                 # Get MySQL configuration again
@@ -126,22 +126,22 @@ def migrate_existing_data():
                 port = int(port) if port else 3306
                 
                 db = MySQLAttendanceDatabase(host=host, user=user, password=password, 
-                                           database=database, port=port)
+                                            database=database, port=port)
                 
                 success = db.migrate_from_sqlite("attendance_system.db")
                 
                 if success:
-                    print("✅ Migration completed successfully!")
+                    print("Migration completed successfully!")
                     # Backup old SQLite database
                     os.rename("attendance_system.db", "attendance_system.db.backup")
-                    print("✅ SQLite database backed up as 'attendance_system.db.backup'")
+                    print("SQLite database backed up as 'attendance_system.db.backup'")
                 else:
-                    print("❌ Migration failed!")
+                    print("Migration failed!")
                     
             except Exception as e:
-                print(f"❌ Migration error: {e}")
+                print(f"Migration error: {e}")
     else:
-        print("ℹ️ No existing SQLite database found")
+        print("No existing SQLite database found")
 
 def create_startup_script():
     """Create startup script for MySQL application"""
@@ -158,7 +158,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from mysql_config import MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT
-    from mysql_attendance_gui import MySQLAttendanceGUI
+    from gui_simple_mysql import SimpleMySQLAttendanceGUI
     
     print("🚀 Starting Advanced Face Recognition System (MySQL)...")
     print("📊 Connected to MySQL database")
@@ -166,7 +166,7 @@ try:
     print("=" * 60)
     
     # Create application with MySQL configuration
-    app = MySQLAttendanceGUI({
+    app = SimpleMySQLAttendanceGUI({
         'host': MYSQL_HOST,
         'user': MYSQL_USER,
         'password': MYSQL_PASSWORD,
@@ -186,10 +186,10 @@ except Exception as e:
     sys.exit(1)
 '''
     
-    with open('start_mysql_app.py', 'w') as f:
+    with open('start_mysql_app.py', 'w', encoding='utf-8') as f:
         f.write(startup_content)
     
-    print("✅ Startup script created: 'start_mysql_app.py'")
+    print("Startup script created: 'start_mysql_app.py'")
 
 def main():
     """Main setup function"""
@@ -209,6 +209,10 @@ def main():
     if not db:
         return
     
+    # Save configuration
+    if config:
+        save_config(**config)
+    
     # Migrate existing data
     migrate_existing_data()
     
@@ -216,7 +220,7 @@ def main():
     create_startup_script()
     
     print("\n" + "=" * 60)
-    print("🎉 MySQL Setup Complete!")
+    print("MySQL Setup Complete!")
     print("=" * 60)
     print("Next steps:")
     print("1. Run the application: python start_mysql_app.py")

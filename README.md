@@ -31,14 +31,16 @@
 
 ## 🛠️ المتطلبات الأساسية (Prerequisites)
 قبل تشغيل النظام، تأكد من توافر البرامج التالية على جهازك:
-1. **Python 3.8+**
+1. **Python 3.8 - 3.11** (recommended for `face_recognition` compatibility)
 2. **برنامج سيرفر MySQL** (مثل: XAMPP، WAMP، أو MySQL Server أساسي). تأكد من تشغيل خدمة الـ MySQL (غالباً على بورت 3306).
 
 ### 📦 تثبيت المكتبات (Dependencies Installation)
 افتح الطرفية (Terminal) أو موجّه الأوامر، ونفّذ الأمر التالي لتثبيت مكتبات الذكاء الاصطناعي وقاعدة البيانات:
 ```bash
-pip install opencv-python face_recognition deepface flask mysql-connector-python numpy
+pip install opencv-python deepface flask mysql-connector-python numpy
 ```
+> ملاحظة: مكتبة `face_recognition` غير مدعومة رسمياً على Python 3.14، لذا استخدم Python 3.10 أو 3.11 إذا كنت تحتاج لهذه الميزة.
+
 
 ---
 

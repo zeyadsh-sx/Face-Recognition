@@ -1,0 +1,206 @@
+:root {
+    --primary-light: #8e51ff;
+    --primary: #7f22fe;
+    --primary-rgb: 127, 34, 254;
+    --primary-dark: #4f39f6;
+    --blue: #155dfc;
+    --blue-light: #2b7fff;
+    --bg-main: #f8fafc;
+    --bg-light: #f6f3f4;
+    --bg-light-rgb: 246, 243, 244;
+    --bg-soft: #ebe6e7;
+    --text-main: #101828;
+    --text-main-rgb: 16, 24, 40;
+    --text-secondary: #6a7282;
+    --text-secondary-rgb: 106, 114, 130;
+    --orange: #ff6900;
+    --yellow: #ffb900;
+    --pink: #ff2056;
+    --red: #e7000b;
+}
+
+@font-face {
+    font-family: 'Inter';
+    src: url(./Inter/static/Inter-Regular.ttf) format('truetype');
+}
+
+body {
+    background-color: var(--bg-main);
+    font-family: 'Inter', sans-serif;
+}
+
+.px-32 {
+    padding-inline: 2rem;
+}
+
+.py-32 {
+    padding-block: 2rem;
+}
+
+.p-20 {
+    padding: 1.25rem;
+}
+
+.mb-32 {
+    margin-bottom: 2rem;
+}
+
+.fs-12 {
+    font-size: .75rem;
+}
+
+.fs-14 {
+    font-size: .875rem;
+}
+
+.rounded-12 {
+    border-radius: .75rem;
+    -webkit-border-radius: .75rem;
+    -moz-border-radius: .75rem;
+    -ms-border-radius: .75rem;
+    -o-border-radius: .75rem;
+}
+
+.text-danger {
+    --bs-danger-rgb: var(--text-main-rgb);
+}
+
+.text-primary {
+    --bs-primary-rgb: var(--primary-rgb);
+}
+
+.text-light {
+    --bs-light-rgb: var(--text-secondary-rgb)
+}
+
+.border-danger {
+    --bs-danger-rgb: var(--bg-light-rgb);
+}
+
+/* ///// general style end ///// */
+
+/* < !-- //// header start --> */
+header {
+    backdrop-filter: blur(3rem);
+}
+
+.navbar .nav-logo {
+    width: 2.75rem;
+    height: 2.75rem;
+    background-image: linear-gradient(to top left, var(--primary-dark), var(--primary));
+    box-shadow: 0 10px 15px -3px #8e51ff40, 0 4px 6px -1px #8e51ff40;
+}
+
+/* < !-- //// header end--> */
+
+/* ////// main start ////// */
+main {
+    max-width: 80rem;
+}
+
+/* ///top boxs start /// */
+.mid-boxs,
+.top-box {
+    box-shadow: 0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;
+    transition: all .15s cubic-bezier(.4, 0, .2, 1);
+    -webkit-transition: all .15s cubic-bezier(.4, 0, .2, 1);
+    -moz-transition: all .15s cubic-bezier(.4, 0, .2, 1);
+    -ms-transition: all .15s cubic-bezier(.4, 0, .2, 1);
+    -o-transition: all .15s cubic-bezier(.4, 0, .2, 1);
+}
+
+.mid-boxs:hover,
+.top-box:hover {
+    box-shadow: 0 10px 15px -1px #0000001a, 0 4px 6px -1px #0000001a;
+}
+
+.top-box-svg {
+    width: 3rem;
+    height: 3rem;
+}
+
+.blue-box {
+    background-image: linear-gradient(to bottom right, var(--blue-light), var(--blue));
+    box-shadow: 0 10px 15px -3px #2b7fff40, 0 4px 6px -4px #2b7fff40;
+}
+
+.orange-box {
+    background-image: linear-gradient(to bottom right, var(--yellow), var(--orange));
+    box-shadow: 0 10px 15px -3px #fe9a0040, 0 4px 6px -4px #fe9a0040;
+}
+
+.red-box {
+    background-image: linear-gradient(to bottom right, var(--pink), var(--red));
+    box-shadow: 0 10px 15px -3px #ff205640, 0 4px 6px -4px #ff205640;
+}
+
+.mix-box {
+    background-image: linear-gradient(to bottom right, var(--yellow), var(--pink));
+    box-shadow: 0 10px 15px -3px #ff205640, 0 4px 6px -4px #fe9a0040;
+}
+
+/* ///top boxs end /// */
+
+/* ///mid boxs start /// */
+.yellow-bg {
+    background-image: linear-gradient(to right, #fffbeb, #fff7ed);
+}
+
+.red-bg {
+    background-image: linear-gradient(to right, #fff1f2, #fef2f2);
+}
+
+.mid-box-svg {
+    width: 2.5rem;
+    height: 2.5rem;
+}
+
+.inner-box {
+    min-height: 200px;
+}
+
+.outer-online {
+    width: 1.25rem;
+    height: 1.25rem;
+    background-color: rgba(25, 135, 84, 0.25);
+}
+
+.inner-online {
+    width: .5rem;
+    height: .5rem;
+}
+
+/* ///mid boxs end /// */
+
+/* < !-- /// last box start /// --> */
+
+.blue-bg {
+    background-image: linear-gradient(to right, #f1f1ff, #f2f3fe);
+}
+
+.btn {
+    --bs-btn-padding-x: 0.875rem;
+    --bs-btn-padding-y: 0.5rem;
+    --bs-btn-font-weight: 600;
+    --bs-btn-border-radius: 1rem;
+}
+
+.btn:hover svg path,
+.btn:focus-visible svg path {
+    fill: white;
+}
+
+.last-box-svg {
+    width: 4.25rem;
+    height: 4.25rem;
+    background-color: rgba(var(--text-secondary-rgb), 0.25);
+
+}
+
+
+
+/* < !-- /// last box end /// --> */
+
+
+
+/* ////// main end ////// */

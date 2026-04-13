@@ -7,10 +7,8 @@ Minimal version without camera for testing
 try:
     import face_recognition
     FACE_RECOGNITION_AVAILABLE = True
-    print("✅ face_recognition available!")
 except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
-    print("⚠️ face_recognition not available, using fallback methods")
 
 import cv2
 import numpy as np

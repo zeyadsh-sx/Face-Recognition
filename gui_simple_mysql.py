@@ -7,19 +7,29 @@ Minimal version without complex geometry issues
 try:
     import face_recognition
     FACE_RECOGNITION_AVAILABLE = True
-    print("✅ face_recognition available!")
 except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
-    print("⚠️ face_recognition not available, using fallback methods")
 
-import cv2
-import numpy as np
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    cv2 = None
+    CV2_AVAILABLE = False
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    np = None
+    NUMPY_AVAILABLE = False
+
 import os
 import pickle
 import json
 from datetime import datetime, date
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from PIL import Image, ImageTk
 import shutil
 import csv
@@ -46,6 +56,7 @@ class SimpleMySQLAttendanceGUI:
         self.known_face_encodings = []
         self.known_face_names = []
         self.today_attendance = {}
+        self.registered_image_tk = None
         
         # Advanced features
         self.anti_spoofing = AntiSpoofing()
@@ -81,10 +92,10 @@ class SimpleMySQLAttendanceGUI:
                 database='attendance_system',
                 port=3306
             )
-            print("✅ MySQL connection successful!")
+            print("MySQL connection successful!")
             return self.db
         except Exception as e:
-            print(f"❌ Connection failed: {e}")
+            print(f"Connection failed: {e}")
             return None
     
     def setup_simple_gui(self):
@@ -104,7 +115,7 @@ class SimpleMySQLAttendanceGUI:
         
         # Title
         title_label = ttk.Label(main_frame, text="Simple MySQL Face Recognition", 
-                               font=('Arial', 16, 'bold'))
+                                font=('Arial', 16, 'bold'))
         title_label.pack(pady=10)
         
         # Control buttons
@@ -126,19 +137,29 @@ class SimpleMySQLAttendanceGUI:
                                     command=self.register_student_simple)
         self.register_btn.pack(side=tk.LEFT, padx=5)
         
+        if not FACE_RECOGNITION_AVAILABLE:
+            self.register_btn.config(state='normal')  # Allow registration even without face recognition
+        
         # View Attendance button
         self.attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
                                       command=self.show_attendance)
         self.attendance_btn.pack(side=tk.LEFT, padx=5)
         
-        # Status label
-        self.status_label = ttk.Label(main_frame, text="Ready", 
-                                    font=('Arial', 12))
+        if not FACE_RECOGNITION_AVAILABLE:
+            self.status_label = ttk.Label(main_frame, text="Face recognition unavailable; basic registration enabled.", 
+                                        font=('Arial', 12), foreground='orange')
+        else:
+            self.status_label = ttk.Label(main_frame, text="Ready", 
+                                        font=('Arial', 12))
         self.status_label.pack(pady=10)
         
         # Video frame
         self.video_frame = ttk.Label(main_frame, text="Camera will appear here")
         self.video_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+
+        # Image preview for registration
+        self.image_label = ttk.Label(main_frame, text="Selected student image will appear here", anchor='center')
+        self.image_label.pack(pady=10, fill=tk.BOTH, expand=True)
     
     def load_known_faces(self):
         """Load known face encodings from database"""
@@ -148,9 +169,8 @@ class SimpleMySQLAttendanceGUI:
             known_face_names = []
             
             for student in students:
-                if student.get('face_encoding'):
-                    encoding = np.fromstring(student['face_encoding'], sep=',')
-                    known_face_encodings.append(encoding)
+                if student.get('face_encoding') is not None:
+                    known_face_encodings.append(student['face_encoding'])
                     known_face_names.append(student['name'])
             
             self.known_face_encodings = known_face_encodings
@@ -161,7 +181,7 @@ class SimpleMySQLAttendanceGUI:
             print(f"Error loading known faces: {e}")
             self.known_face_encodings = []
             self.known_face_names = []
-    
+
     def load_attendance_data(self):
         """Load today's attendance from database"""
         try:
@@ -184,6 +204,10 @@ class SimpleMySQLAttendanceGUI:
     
     def start_camera(self):
         """Start camera for face recognition"""
+        if not CV2_AVAILABLE:
+            messagebox.showerror("Camera Error", "OpenCV is not available. Please install opencv-python to use the camera.")
+            return
+
         try:
             self.video_capture = cv2.VideoCapture(0)
             if not self.video_capture.isOpened():
@@ -207,80 +231,99 @@ class SimpleMySQLAttendanceGUI:
         if self.video_capture:
             self.video_capture.release()
             self.video_capture = None
-        
+
         self.camera_running = False
         self.start_btn.config(state='normal')
         self.stop_btn.config(state='disabled')
         self.status_label.config(text="Camera stopped")
         self.video_frame.config(text="Camera stopped")
+
+        if CV2_AVAILABLE:
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
     
     def camera_loop(self):
         """Camera processing loop"""
         while self.camera_running:
-            if self.video_capture:
-                ret, frame = self.video_capture.read()
-                if not ret:
-                    continue
+            if not CV2_AVAILABLE or not self.video_capture:
+                break
+
+            ret, frame = self.video_capture.read()
+            if not ret:
+                continue
                 
-                # Convert color space
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Convert color space
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            if FACE_RECOGNITION_AVAILABLE and NUMPY_AVAILABLE and self.known_face_encodings:
+                # Find faces and encodings
+                face_locations = face_recognition.face_locations(rgb_frame)
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
                 
-                if FACE_RECOGNITION_AVAILABLE:
-                    # Find faces and encodings
-                    face_locations = face_recognition.face_locations(rgb_frame)
-                    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                # Loop through found faces
+                for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                    # Compare with known faces
+                    matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding, tolerance=0.6)
+                    name = "Unknown"
                     
-                    # Loop through found faces
-                    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-                        # Compare with known faces
-                        matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding, tolerance=0.6)
-                        name = "Unknown"
+                    if True in matches:
+                        first_match_index = matches.index(True)
+                        name = self.known_face_names[first_match_index]
                         
-                        if True in matches:
-                            first_match_index = matches.index(True)
-                            name = self.known_face_names[first_match_index]
-                            
-                            # Mark attendance
-                            self.mark_attendance_simple(name)
-                        
-                        # Draw rectangle and name
-                        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                        cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                else:
-                    # Fallback - basic face detection
-                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+                        # Mark attendance
+                        self.mark_attendance_simple(name)
                     
-                    for (x, y, w, h) in faces:
-                        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                        cv2.putText(frame, "Face Detected", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    # Draw rectangle and name
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            elif CV2_AVAILABLE:
+                # Fallback - basic face detection when no face encodings available
+                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
                 
-                # Show frame
-                cv2.imshow('Face Recognition', frame)
-                
-                # Check for quit
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
+                for (x, y, w, h) in faces:
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    cv2.putText(frame, "Face Detected (No Recognition)", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            
+            # Show frame
+            cv2.imshow('Face Recognition', frame)
+            
+            # Check for quit
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
     
     def mark_attendance_simple(self, name):
         """Mark attendance in database"""
         try:
+            student = self.db.get_student_by_name(name)
+            if not student:
+                print(f"Error marking attendance: student '{name}' not found")
+                return
+
             now = datetime.now()
             date_str = now.date().isoformat()
             time_str = now.time().strftime("%H:%M:%S")
-            
-            # Add to database
-            attendance_id = self.db.add_attendance(name, date_str, time_str, emotion='neutral', is_real_face=True)
-            
-            if attendance_id:
+
+            success, message = self.db.mark_attendance_advanced(
+                student_id=student['id'],
+                date_str=date_str,
+                time_str=time_str,
+                emotion='neutral',
+                is_real_face=True
+            )
+
+            if success:
                 self.today_attendance[name] = {
                     'time': time_str,
                     'emotion': 'neutral',
                     'is_real_face': True
                 }
-                print(f"✅ Attendance marked for {name}")
-            
+            else:
+                print(f"Error marking attendance: {message}")
+
         except Exception as e:
             print(f"Error marking attendance: {e}")
     
@@ -288,7 +331,7 @@ class SimpleMySQLAttendanceGUI:
         """Simple student registration"""
         try:
             # Ask for student name
-            name = tk.simpledialog.askstring("Register Student", "Enter student name:")
+            name = simpledialog.askstring("Register Student", "Enter student name:")
             if not name:
                 return
             
@@ -301,16 +344,30 @@ class SimpleMySQLAttendanceGUI:
             if not image_path:
                 return
             
-            # Load and process image
-            image = face_recognition.load_image_file(image_path)
-            face_encodings = face_recognition.face_encodings(image)
-            
-            if not face_encodings:
-                messagebox.showerror("Error", "No face found in image")
-                return
+            # Show selected image preview even if face recognition is not available
+            pil_image = Image.open(image_path)
+            pil_image = pil_image.resize((320, 240), Image.LANCZOS)
+            self.registered_image_tk = ImageTk.PhotoImage(pil_image)
+            self.image_label.config(image=self.registered_image_tk, text="")
+            self.image_label.image = self.registered_image_tk
+
+            face_encoding = None
+            if FACE_RECOGNITION_AVAILABLE:
+                # Load and process image
+                image = face_recognition.load_image_file(image_path)
+                face_encodings = face_recognition.face_encodings(image)
+                
+                if not face_encodings:
+                    messagebox.showerror("Error", "No face found in image")
+                    return
+                
+                face_encoding = face_encodings[0]
+            else:
+                # Allow registration without face recognition
+                messagebox.showinfo("Info", "Face recognition not available. Registering student without face data.")
             
             # Add to database
-            student_id = self.db.add_student(name, face_encodings[0], image_path)
+            student_id = self.db.add_student(name, face_encoding, image_path)
             
             if student_id:
                 messagebox.showinfo("Success", f"Student {name} registered successfully!")
@@ -368,11 +425,11 @@ class SimpleMySQLAttendanceGUI:
 
 if __name__ == "__main__":
     try:
-        print("🚀 Starting Simple MySQL GUI...")
+        print("Starting Simple MySQL GUI...")
         app = SimpleMySQLAttendanceGUI()
         if hasattr(app, 'root'):
-            print("✅ GUI initialized successfully")
+            print("GUI initialized successfully")
             app.run()
     except Exception as e:
-        print(f"❌ Application error: {e}")
+        print(f"Application error: {e}")
         messagebox.showerror("Fatal Error", f"Application failed to start: {e}")
