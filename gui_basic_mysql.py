@@ -375,5 +375,6 @@ if __name__ == "__main__":
             print("✅ GUI initialized successfully")
             app.run()
     except Exception as e:
-        print(f"❌ Application error: {e}")
-        messagebox.showerror("Fatal Error", f"Application failed to start: {e}")
+        print(f"❌ Error starting GUI: {e}")
+        import traceback
+        traceback.print_exc()

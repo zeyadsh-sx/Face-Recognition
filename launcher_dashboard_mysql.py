@@ -16,7 +16,7 @@ try:
     print("=" * 60)
     
     # Import and run the MySQL dashboard
-    from dashboard_web_standalone import app
+    from dashboard_final import app
     
     print("✅ MySQL Dashboard connected successfully!")
     print("🔒 Advanced features enabled: Anti-spoofing, Emotion Detection, Unknown Face Alerts")
@@ -32,9 +32,9 @@ try:
 except ImportError as e:
     print(f"❌ Import Error: {e}")
     print("Please make sure all required files are present:")
-    print("- dashboard_mysql.py")
-    print("- database_mysql.py")
-    print("- advanced_features.py")
+    print("- dashboard_final.py")
+    print("- database_core_mysql.py")
+    print("- features_ai_advanced.py")
     print("Also ensure MySQL connector is installed: pip install mysql-connector-python")
     sys.exit(1)
     
