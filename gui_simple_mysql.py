@@ -57,6 +57,7 @@ class SimpleMySQLAttendanceGUI:
         self.known_face_names = []
         self.today_attendance = {}
         self.registered_image_tk = None
+        self.flip_camera = False  # Add flip camera flag
         
         # Advanced features
         self.anti_spoofing = AntiSpoofing()
@@ -131,6 +132,11 @@ class SimpleMySQLAttendanceGUI:
         self.stop_btn = ttk.Button(button_frame, text="⏹️ Stop Camera", 
                                   command=self.stop_camera, state='disabled')
         self.stop_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Flip Camera button
+        self.flip_btn = ttk.Button(button_frame, text="🔄 Flip Camera", 
+                                  command=self.toggle_flip_camera)
+        self.flip_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student button
         self.register_btn = ttk.Button(button_frame, text="👤 Register Student", 
@@ -244,6 +250,13 @@ class SimpleMySQLAttendanceGUI:
             except Exception:
                 pass
     
+    def toggle_flip_camera(self):
+        """Toggle camera flip"""
+        self.flip_camera = not self.flip_camera
+        status = "ON" if self.flip_camera else "OFF"
+        self.status_label.config(text=f"Camera flip: {status}")
+        print(f"Camera flip toggled: {status}")
+    
     def camera_loop(self):
         """Camera processing loop"""
         while self.camera_running:
@@ -253,6 +266,10 @@ class SimpleMySQLAttendanceGUI:
             ret, frame = self.video_capture.read()
             if not ret:
                 continue
+            
+            # Flip camera if enabled
+            if self.flip_camera:
+                frame = cv2.flip(frame, 1)  # 1 = flip horizontally
                 
             # Convert color space
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
