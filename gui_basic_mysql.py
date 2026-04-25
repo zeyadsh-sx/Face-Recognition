@@ -26,6 +26,7 @@ import csv
 import threading
 import time
 from database_core_mysql import MySQLAttendanceDatabase
+from face_registration_wizard import FaceRegistrationWizard
 
 class BasicMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -106,7 +107,7 @@ class BasicMySQLAttendanceGUI:
         
         # Title
         title_label = ttk.Label(main_frame, text="Basic MySQL Face Recognition", 
-                               font=('Arial', 16, 'bold'))
+                            font=('Arial', 16, 'bold'))
         title_label.pack(pady=10)
         
         # Status frame
@@ -169,8 +170,13 @@ class BasicMySQLAttendanceGUI:
         
         # Register Student button
         register_btn = ttk.Button(button_frame, text="👤 Register Student", 
-                                   command=self.register_student_basic)
+                                    command=self.register_student_basic)
         register_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Register Student with Wizard button
+        wizard_btn = ttk.Button(button_frame, text="🧙 Registration Wizard", 
+                               command=self.open_registration_wizard)
+        wizard_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student with Camera button
         register_camera_btn = ttk.Button(button_frame, text="📹 Register with Camera", 
@@ -179,7 +185,7 @@ class BasicMySQLAttendanceGUI:
         
         # View Attendance button
         attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
-                                      command=self.show_attendance_basic)
+                                    command=self.show_attendance_basic)
         attendance_btn.pack(side=tk.LEFT, padx=5)
         
         # Test Database button
@@ -189,7 +195,7 @@ class BasicMySQLAttendanceGUI:
         
         # Exit button
         exit_btn = ttk.Button(button_frame, text="❌ Exit", 
-                               command=self.on_closing)
+                                command=self.on_closing)
         exit_btn.pack(side=tk.LEFT, padx=5)
         
         # Handle window closing
@@ -259,6 +265,16 @@ class BasicMySQLAttendanceGUI:
                 
         except Exception as e:
             messagebox.showerror("Database Error", f"Database test failed: {e}")
+    
+    def open_registration_wizard(self):
+        """Open the face registration wizard"""
+        try:
+            wizard = FaceRegistrationWizard(db=self.db)
+            wizard.run()
+            # Reload faces after wizard completes
+            self.load_known_faces()
+        except Exception as e:
+            messagebox.showerror("Wizard Error", f"Failed to open registration wizard: {e}")
     
     def update_statistics_thread(self):
         """Background thread to update statistics continuously"""
