@@ -245,6 +245,11 @@ class MySQLAttendanceDatabase:
         except Error as e:
             print(f"Error adding student: {e}")
             return None
+
+    def add_student(self, name: str, face_encoding: Any, image_path: Optional[str] = None, 
+                    notes: Optional[str] = None) -> Optional[int]:
+        """Backwards-compatible add_student alias"""
+        return self.add_student_advanced(name, face_encoding, image_path, notes)
     
     def get_all_students(self) -> List[Dict]:
         """Get all students with their face encodings"""

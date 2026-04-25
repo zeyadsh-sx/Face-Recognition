@@ -19,7 +19,7 @@ import pickle
 import json
 from datetime import datetime, date
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 from PIL import Image, ImageTk
 import shutil
 import csv
@@ -44,6 +44,15 @@ class BasicMySQLAttendanceGUI:
         self.known_face_names = []
         self.today_attendance = {}
         
+        # Statistics variables
+        self.total_students = 0
+        self.today_attendance_count = 0
+        self.attendance_percentage = 0.0
+        self.real_faces_today = 0
+        self.spoofed_faces_today = 0
+        self.emotions_today = {}
+        self.stats_running = True
+        
         # Directories
         self.known_faces_dir = "known_faces"
         self.attendance_images_dir = "attendance_images"
@@ -60,6 +69,10 @@ class BasicMySQLAttendanceGUI:
         # Load data
         self.load_known_faces()
         self.load_attendance_data()
+        
+        # Start statistics update thread
+        stats_thread = threading.Thread(target=self.update_statistics_thread, daemon=True)
+        stats_thread.start()
     
     def setup_database_connection(self):
         """Setup MySQL database connection with default XAMPP settings"""
@@ -104,24 +117,51 @@ class BasicMySQLAttendanceGUI:
         db_status = "✅ Connected" if self.db else "❌ Disconnected"
         ttk.Label(status_frame, text=f"MySQL Database: {db_status}").pack(anchor=tk.W, pady=5)
         
-        # Students count
-        try:
-            if self.db:
-                students = self.db.get_all_students()
-                student_count = len(students)
-                ttk.Label(status_frame, text=f"Registered Students: {student_count}").pack(anchor=tk.W, pady=5)
-        except:
-            ttk.Label(status_frame, text="Registered Students: 0").pack(anchor=tk.W, pady=5)
+        # Create Live Statistics Panel
+        stats_panel = ttk.LabelFrame(main_frame, text="📊 Live Statistics (Auto-Refreshing)", padding="15")
+        stats_panel.pack(fill=tk.BOTH, expand=True, pady=15)
         
-        # Today's attendance count
-        try:
-            if self.db:
-                today = date.today().isoformat()
-                attendance_records = self.db.get_attendance_with_emotions(today)
-                attendance_count = len(attendance_records)
-                ttk.Label(status_frame, text=f"Today's Attendance: {attendance_count}").pack(anchor=tk.W, pady=5)
-        except:
-            ttk.Label(status_frame, text="Today's Attendance: 0").pack(anchor=tk.W, pady=5)
+        # Create a grid for statistics
+        stats_grid = ttk.Frame(stats_panel)
+        stats_grid.pack(fill=tk.BOTH, expand=True)
+        
+        # Statistics labels (these will be updated by the thread)
+        self.stats_labels = {}
+        
+        # Row 1: Basic counts
+        ttk.Label(stats_grid, text="👥 Total Students:", font=('Arial', 11, 'bold')).grid(row=0, column=0, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['total_students'] = ttk.Label(stats_grid, text="0", font=('Arial', 11, 'italic'), foreground='#0066cc')
+        self.stats_labels['total_students'].grid(row=0, column=1, sticky=tk.W, padx=10, pady=8)
+        
+        ttk.Label(stats_grid, text="📍 Today's Present:", font=('Arial', 11, 'bold')).grid(row=0, column=2, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['attendance_count'] = ttk.Label(stats_grid, text="0", font=('Arial', 11, 'italic'), foreground='#00aa00')
+        self.stats_labels['attendance_count'].grid(row=0, column=3, sticky=tk.W, padx=10, pady=8)
+        
+        # Row 2: Percentage and real faces
+        ttk.Label(stats_grid, text="📈 Attendance Rate:", font=('Arial', 11, 'bold')).grid(row=1, column=0, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['attendance_rate'] = ttk.Label(stats_grid, text="0%", font=('Arial', 11, 'italic'), foreground='#ff6600')
+        self.stats_labels['attendance_rate'].grid(row=1, column=1, sticky=tk.W, padx=10, pady=8)
+        
+        ttk.Label(stats_grid, text="✅ Real Faces:", font=('Arial', 11, 'bold')).grid(row=1, column=2, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['real_faces'] = ttk.Label(stats_grid, text="0", font=('Arial', 11, 'italic'), foreground='#00aa00')
+        self.stats_labels['real_faces'].grid(row=1, column=3, sticky=tk.W, padx=10, pady=8)
+        
+        # Row 3: Spoofed faces and emotions
+        ttk.Label(stats_grid, text="⚠️ Spoofed/Suspicious:", font=('Arial', 11, 'bold')).grid(row=2, column=0, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['spoofed_faces'] = ttk.Label(stats_grid, text="0", font=('Arial', 11, 'italic'), foreground='#cc0000')
+        self.stats_labels['spoofed_faces'].grid(row=2, column=1, sticky=tk.W, padx=10, pady=8)
+        
+        ttk.Label(stats_grid, text="😊 Top Emotion Today:", font=('Arial', 11, 'bold')).grid(row=2, column=2, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['top_emotion'] = ttk.Label(stats_grid, text="N/A", font=('Arial', 11, 'italic'), foreground='#9900cc')
+        self.stats_labels['top_emotion'].grid(row=2, column=3, sticky=tk.W, padx=10, pady=8)
+        
+        # Row 4: Last update time
+        ttk.Label(stats_grid, text="🔄 Last Updated:", font=('Arial', 9)).grid(row=3, column=0, columnspan=4, sticky=tk.W, padx=10, pady=8)
+        self.stats_labels['last_update'] = ttk.Label(stats_grid, text=datetime.now().strftime("%H:%M:%S"), font=('Arial', 9, 'italic'), foreground='#666666')
+        self.stats_labels['last_update'].grid(row=3, column=1, sticky=tk.W, padx=10, pady=8)
+        
+        # Separator
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
         # Button frame
         button_frame = ttk.Frame(main_frame)
@@ -149,8 +189,11 @@ class BasicMySQLAttendanceGUI:
         
         # Exit button
         exit_btn = ttk.Button(button_frame, text="❌ Exit", 
-                               command=self.root.quit)
+                               command=self.on_closing)
         exit_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Handle window closing
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
     def load_known_faces(self):
         """Load known face encodings from database"""
@@ -217,6 +260,94 @@ class BasicMySQLAttendanceGUI:
         except Exception as e:
             messagebox.showerror("Database Error", f"Database test failed: {e}")
     
+    def update_statistics_thread(self):
+        """Background thread to update statistics continuously"""
+        while self.stats_running:
+            try:
+                # Update statistics from database
+                self.refresh_statistics()
+                
+                # Update GUI labels (thread-safe)
+                self.root.after(0, self.update_stats_display)
+                
+                # Wait 3 seconds before next update
+                time.sleep(3)
+                
+            except Exception as e:
+                print(f"Error in statistics thread: {e}")
+                time.sleep(3)
+    
+    def refresh_statistics(self):
+        """Fetch fresh statistics from database"""
+        try:
+            if not self.db:
+                return
+            
+            # Get total students
+            students = self.db.get_all_students()
+            self.total_students = len(students)
+            
+            # Get today's attendance
+            today = date.today().isoformat()
+            attendance_records = self.db.get_attendance_with_emotions(today)
+            self.today_attendance_count = len(attendance_records)
+            
+            # Calculate attendance percentage
+            if self.total_students > 0:
+                self.attendance_percentage = (self.today_attendance_count / self.total_students) * 100
+            else:
+                self.attendance_percentage = 0.0
+            
+            # Count real faces vs spoofed
+            self.real_faces_today = 0
+            self.spoofed_faces_today = 0
+            self.emotions_today = {}
+            
+            for record in attendance_records:
+                if record.get('is_real_face', True):
+                    self.real_faces_today += 1
+                else:
+                    self.spoofed_faces_today += 1
+                
+                # Count emotions
+                emotion = record.get('emotion', 'Unknown')
+                if emotion and emotion != 'N/A':
+                    self.emotions_today[emotion] = self.emotions_today.get(emotion, 0) + 1
+                    
+        except Exception as e:
+            print(f"Error refreshing statistics: {e}")
+    
+    def update_stats_display(self):
+        """Update GUI with new statistics (called from main thread)"""
+        try:
+            # Update each label
+            self.stats_labels['total_students'].config(text=str(self.total_students))
+            self.stats_labels['attendance_count'].config(text=str(self.today_attendance_count))
+            self.stats_labels['attendance_rate'].config(text=f"{self.attendance_percentage:.1f}%")
+            self.stats_labels['real_faces'].config(text=str(self.real_faces_today))
+            self.stats_labels['spoofed_faces'].config(text=str(self.spoofed_faces_today))
+            
+            # Get top emotion
+            if self.emotions_today:
+                top_emotion = max(self.emotions_today, key=self.emotions_today.get)
+                emotion_count = self.emotions_today[top_emotion]
+                self.stats_labels['top_emotion'].config(text=f"{top_emotion} ({emotion_count})")
+            else:
+                self.stats_labels['top_emotion'].config(text="No data")
+            
+            # Update last refresh time
+            current_time = datetime.now().strftime("%H:%M:%S")
+            self.stats_labels['last_update'].config(text=current_time)
+            
+        except Exception as e:
+            print(f"Error updating stats display: {e}")
+    
+    def on_closing(self):
+        """Handle window closing properly"""
+        self.stats_running = False
+        self.root.quit()
+        self.root.destroy()
+    
     def register_student_with_camera(self):
         """Register student using camera capture"""
         try:
@@ -235,49 +366,51 @@ class BasicMySQLAttendanceGUI:
             
             print("✅ Camera opened successfully!")
             print("📸 Position student in front of camera...")
-            print("⌨️ Press 'c' to capture, 'q' to cancel")
+            print("⌨️ Press 'c' to capture, 'q' or Esc to cancel")
             
-            # Camera capture loop
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    continue
-                
-                # Show frame
-                cv2.imshow('Student Registration', frame)
-                key = cv2.waitKey(1) & 0xFF
-                
-                if key == ord('c'):
-                    print("📸 Capturing image...")
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"{name}_{timestamp}.jpg"
-                    cv2.imwrite(filename, frame)
-                    print(f"✅ Image saved as {filename}")
+            try:
+                # Camera capture loop
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        continue
                     
-                    # Add to database
-                    if FACE_RECOGNITION_AVAILABLE:
-                        image = face_recognition.load_image_file(filename)
-                        face_encodings = face_recognition.face_encodings(image)
-                        if face_encodings:
-                            student_id = self.db.add_student(name, face_encodings[0], filename)
+                    # Show frame
+                    cv2.imshow('Student Registration', frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    
+                    if key == ord('c'):
+                        print("📸 Capturing image...")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{name}_{timestamp}.jpg"
+                        cv2.imwrite(filename, frame)
+                        print(f"✅ Image saved as {filename}")
+                        
+                        # Add to database
+                        if FACE_RECOGNITION_AVAILABLE:
+                            image = face_recognition.load_image_file(filename)
+                            face_encodings = face_recognition.face_encodings(image)
+                            if face_encodings:
+                                student_id = self.db.add_student(name, face_encodings[0], filename)
+                                if student_id:
+                                    messagebox.showinfo("Success", f"Student {name} registered successfully with photo!")
+                                    self.load_known_faces()
+                                    break
+                        else:
+                            # Add without face encoding
+                            student_id = self.db.add_student(name, None, filename)
                             if student_id:
-                                messagebox.showinfo("Success", f"Student {name} registered successfully with photo!")
+                                messagebox.showinfo("Success", f"Student {name} registered successfully!")
                                 self.load_known_faces()
                                 break
-                    else:
-                        # Add without face encoding
-                        student_id = self.db.add_student(name, None, filename)
-                        if student_id:
-                            messagebox.showinfo("Success", f"Student {name} registered successfully!")
-                            self.load_known_faces()
-                            break
-                elif key == ord('q'):
-                    print("❌ Registration cancelled")
-                    break
-            
-            # Cleanup
-            cap.release()
-            cv2.destroyAllWindows()
+                    elif key == ord('q') or key == 27:
+                        print("❌ Registration cancelled")
+                        break
+            finally:
+                # Cleanup always runs, even on exceptions
+                cap.release()
+                cv2.destroyAllWindows()
+                print("📷 Camera closed")
             
         except Exception as e:
             messagebox.showerror("Registration Error", f"Camera registration failed: {e}")
@@ -356,7 +489,7 @@ class BasicMySQLAttendanceGUI:
             
             # Close button
             close_btn = ttk.Button(attendance_window, text="Close", 
-                                 command=attendance_window.destroy)
+                                command=attendance_window.destroy)
             close_btn.pack(pady=10)
             
         except Exception as e:

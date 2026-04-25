@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
+<<<<<<< HEAD
 MySQL GUI Application Startup Script for Advanced Face Recognition System
+=======
+Startup script for MySQL Face Recognition System
+>>>>>>> 0ff114af8d6095d7552fa329158b80fa8261a7c5
 """
 
 import sys
 import os
+<<<<<<< HEAD
 import subprocess
 import time
 from pathlib import Path
+=======
+>>>>>>> 0ff114af8d6095d7552fa329158b80fa8261a7c5
 
 # Add current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+<<<<<<< HEAD
 def print_menu():
     """Print main menu"""
     print("\n" + "=" * 70)
@@ -164,3 +172,33 @@ if __name__ == "__main__":
         print(f"\n❌ Fatal Error: {e}")
         import traceback
         traceback.print_exc()
+=======
+try:
+    from mysql_config import MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT
+    from gui_simple_mysql import SimpleMySQLAttendanceGUI
+    
+    print("🚀 Starting Advanced Face Recognition System (MySQL)...")
+    print("📊 Connected to MySQL database")
+    print("🔒 Advanced features enabled: Anti-spoofing, Emotion Detection, Unknown Face Alerts")
+    print("=" * 60)
+    
+    # Create application with MySQL configuration
+    app = SimpleMySQLAttendanceGUI({
+        'host': MYSQL_HOST,
+        'user': MYSQL_USER,
+        'password': MYSQL_PASSWORD,
+        'database': MYSQL_DATABASE,
+        'port': MYSQL_PORT
+    })
+    
+    app.run()
+    
+except ImportError as e:
+    print(f"❌ Import Error: {e}")
+    print("Please run setup_mysql.py first to configure MySQL")
+    sys.exit(1)
+    
+except Exception as e:
+    print(f"❌ Error starting application: {e}")
+    sys.exit(1)
+>>>>>>> 0ff114af8d6095d7552fa329158b80fa8261a7c5
