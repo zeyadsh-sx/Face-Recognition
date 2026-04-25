@@ -1,5 +1,5 @@
 # MySQL Configuration for Face Recognition System
-# Generated on 2026-04-13 19:08:44
+# Generated on 2026-04-25 16:22:08
 
 MYSQL_HOST = "localhost"
 MYSQL_USER = "root"

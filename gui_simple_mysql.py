@@ -36,7 +36,7 @@ import csv
 import threading
 import time
 from database_core_mysql import MySQLAttendanceDatabase
-from features_ai_advanced import AntiSpoofing, EmotionDetector, UnknownFaceAlert, LectureSystem, AdvancedAttendanceReporter
+from features_ai_advanced import AntiSpoofing, EmotionDetector, UnknownFaceAlert, LectureSystem, AdvancedAttendanceReporter, FaceQualityAssessment, FaceClustering
 
 class SimpleMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -64,6 +64,8 @@ class SimpleMySQLAttendanceGUI:
         self.unknown_face_alert = UnknownFaceAlert(self.db)
         self.lecture_system = None  # Disable lecture system for simplicity
         self.advanced_reporter = AdvancedAttendanceReporter(self.db)
+        self.face_quality = FaceQualityAssessment()  # Face Quality Assessment
+        self.face_clustering = FaceClustering()  # Face Clustering
         
         # Directories
         self.known_faces_dir = "known_faces"
@@ -172,9 +174,27 @@ class SimpleMySQLAttendanceGUI:
                 if student.get('face_encoding') is not None:
                     known_face_encodings.append(student['face_encoding'])
                     known_face_names.append(student['name'])
+                    
+                    # Add to face clustering system
+                    if hasattr(student, 'id') and student.get('face_encoding') is not None:
+                        self.face_clustering.add_face(
+                            face_id=str(student['id']),
+                            face_encoding=student['face_encoding'],
+                            metadata={
+                                'name': student['name'],
+                                'image_path': student.get('image_path', '')
+                            }
+                        )
             
             self.known_face_encodings = known_face_encodings
             self.known_face_names = known_face_names
+            
+            # Run clustering analysis
+            if len(known_face_names) > 1:
+                duplicate_groups = self.face_clustering.detect_duplicate_groups()
+                if duplicate_groups:
+                    print(f"⚠️ Found {len(duplicate_groups)} potential duplicate groups")
+            
             print(f"Loaded {len(known_face_names)} known faces from database")
             
         except Exception as e:
@@ -264,6 +284,23 @@ class SimpleMySQLAttendanceGUI:
                 
                 # Loop through found faces
                 for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                    # Extract face region for quality assessment
+                    face_region = frame[top:bottom, left:right]
+                    
+                    # Face Quality Assessment - تقييم جودة الصورة
+                    quality_result = self.face_quality.assess_quality(face_region, frame, (top, right, bottom, left))
+                    
+                    # Draw quality indicator on frame
+                    frame = self.face_quality.draw_quality_indicator(frame, (top, right, bottom, left), quality_result)
+                    
+                    # Only proceed if quality is acceptable
+                    if not quality_result['is_acceptable']:
+                        # Show warning message
+                        quality_msg = self.face_quality.get_quality_message(quality_result)
+                        cv2.putText(frame, quality_msg[:50], (10, 30), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                        continue  # Skip this face - quality not acceptable
+                    
                     # Compare with known faces
                     matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding, tolerance=0.6)
                     name = "Unknown"
@@ -351,6 +388,25 @@ class SimpleMySQLAttendanceGUI:
             self.image_label.config(image=self.registered_image_tk, text="")
             self.image_label.image = self.registered_image_tk
 
+            # Face Quality Assessment for registration image
+            if CV2_AVAILABLE:
+                # Load image with OpenCV for quality assessment
+                cv_image = cv2.imread(image_path)
+                if cv_image is not None:
+                    # Get face location if available
+                    if FACE_RECOGNITION_AVAILABLE:
+                        image_rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                        face_locations = face_recognition.face_locations(image_rgb)
+                        if face_locations:
+                            top, right, bottom, left = face_locations[0]
+                            face_region = cv_image[top:bottom, left:right]
+                            quality_result = self.face_quality.assess_quality(face_region, cv_image, face_locations[0])
+                            
+                            if not quality_result['is_acceptable']:
+                                quality_msg = self.face_quality.get_quality_message(quality_result)
+                                messagebox.showwarning("Image Quality Warning", quality_msg)
+                                return  # Reject the image
+
             face_encoding = None
             if FACE_RECOGNITION_AVAILABLE:
                 # Load and process image
@@ -362,6 +418,24 @@ class SimpleMySQLAttendanceGUI:
                     return
                 
                 face_encoding = face_encodings[0]
+                
+                # Face Clustering - Check for duplicates before registration
+                temp_clustering = FaceClustering()
+                temp_clustering.add_face('temp_new', face_encoding, {'name': name, 'image_path': image_path})
+                
+                # Compare with existing faces
+                for existing_id, existing_encoding in self.face_clustering.face_encodings.items():
+                    distance = np.linalg.norm(face_encoding - existing_encoding)
+                    if distance < 0.6:  # Similar face found
+                        existing_name = self.face_clustering.face_metadata.get(existing_id, {}).get('name', 'Unknown')
+                        response = messagebox.askyesno(
+                            "Duplicate Detected",
+                            f"This face is similar to '{existing_name}' already registered.\n\n"
+                            f"Do you want to continue anyway?"
+                        )
+                        if not response:
+                            return
+                        break
             else:
                 # Allow registration without face recognition
                 messagebox.showinfo("Info", "Face recognition not available. Registering student without face data.")
