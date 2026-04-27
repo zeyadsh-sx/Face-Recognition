@@ -28,6 +28,7 @@ import time
 from database_core_mysql import MySQLAttendanceDatabase
 from face_registration_wizard import FaceRegistrationWizard
 from settings_panel import SettingsPanel
+from screenshot_capture import ScreenshotCapture
 
 class BasicMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -183,8 +184,11 @@ class BasicMySQLAttendanceGUI:
         settings_btn = ttk.Button(button_frame, text="⚙️ Settings", 
                                 command=self.open_settings_panel)
         settings_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Register Student with Camera button
+                # Screenshot button
+        screenshot_btn = ttk.Button(button_frame, text="📸 Screenshot", 
+                                    command=self.open_screenshot_capture)
+        screenshot_btn.pack(side=tk.LEFT, padx=5)
+                # Register Student with Camera button
         register_camera_btn = ttk.Button(button_frame, text="📹 Register with Camera", 
                                         command=self.register_student_with_camera)
         register_camera_btn.pack(side=tk.LEFT, padx=5)
@@ -289,6 +293,14 @@ class BasicMySQLAttendanceGUI:
             settings.run()
         except Exception as e:
             messagebox.showerror("Settings Error", f"Failed to open settings panel: {e}")
+    
+    def open_screenshot_capture(self):
+        """Open the screenshot capture tool"""
+        try:
+            screenshot = ScreenshotCapture(parent=self.root)
+            screenshot.run()
+        except Exception as e:
+            messagebox.showerror("Screenshot Error", f"Failed to open screenshot capture: {e}")
     
     def update_statistics_thread(self):
         """Background thread to update statistics continuously"""
