@@ -17,6 +17,20 @@ except ImportError:
     cv2 = None
     CV2_AVAILABLE = False
 
+# Try to import face_recognition, if not available use OpenCV's LBP recognizer
+try:
+    import face_recognition
+    FACE_RECOGNITION_AVAILABLE = True
+except ImportError:
+    FACE_RECOGNITION_AVAILABLE = False
+    # Use OpenCV's LBP face recognizer as fallback
+    try:
+        if CV2_AVAILABLE:
+            face_recognition = None
+            # Will use cv2.face.LBPHFaceRecognizer instead
+    except:
+        pass
+
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -66,6 +80,17 @@ class SimpleMySQLAttendanceGUI:
         self.advanced_reporter = AdvancedAttendanceReporter(self.db)
         self.face_quality = FaceQualityAssessment()  # Face Quality Assessment
         self.face_clustering = FaceClustering()  # Face Clustering
+        
+        # OpenCV face recognizer (fallback when face_recognition not available)
+        self.face_recognizer = None
+        self.face_label_map = {}  # Maps label ID to student name
+        if not FACE_RECOGNITION_AVAILABLE and CV2_AVAILABLE:
+            try:
+                import cv2.face
+                self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
+                print("OpenCV face recognizer initialized (fallback mode)")
+            except Exception as e:
+                print(f"Could not initialize OpenCV face recognizer: {e}")
         
         # Directories
         self.known_faces_dir = "known_faces"
@@ -170,6 +195,14 @@ class SimpleMySQLAttendanceGUI:
             known_face_encodings = []
             known_face_names = []
             
+            # For OpenCV face recognizer fallback
+            if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None:
+                import cv2
+                training_images = []
+                training_labels = []
+                self.face_label_map = {}
+                label_counter = 0
+            
             for student in students:
                 if student.get('face_encoding') is not None:
                     known_face_encodings.append(student['face_encoding'])
@@ -185,6 +218,28 @@ class SimpleMySQLAttendanceGUI:
                                 'image_path': student.get('image_path', '')
                             }
                         )
+                    
+                    # For OpenCV recognizer - load training images
+                    if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None:
+                        image_path = student.get('image_path')
+                        if image_path and os.path.exists(image_path):
+                            try:
+                                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                                if img is not None:
+                                    training_images.append(img)
+                                    training_labels.append(label_counter)
+                                    self.face_label_map[label_counter] = student['name']
+                                    label_counter += 1
+                            except Exception as e:
+                                print(f"Error loading image {image_path}: {e}")
+            
+            # Train OpenCV recognizer if we have training data
+            if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None and training_images:
+                try:
+                    self.face_recognizer.train(training_images, np.array(training_labels))
+                    print(f"OpenCV face recognizer trained with {len(training_images)} images")
+                except Exception as e:
+                    print(f"Error training OpenCV recognizer: {e}")
             
             self.known_face_encodings = known_face_encodings
             self.known_face_names = known_face_names
@@ -316,14 +371,37 @@ class SimpleMySQLAttendanceGUI:
                     cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
                     cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             elif CV2_AVAILABLE:
-                # Fallback - basic face detection when no face encodings available
-                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                # Fallback - use OpenCV face recognizer if available
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                face_cascade = cv2.CascadeClassifier(cascade_path)
+                if face_cascade.empty():
+                    # Try alternative path
+                    cv2_path = os.path.dirname(cv2.__file__)
+                    cascade_path = os.path.join(cv2_path, 'data', 'haarcascade_frontalface_default.xml')
+                    face_cascade = cv2.CascadeClassifier(cascade_path)
+                
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
                 
                 for (x, y, w, h) in faces:
+                    # Draw rectangle around face
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, "Face Detected (No Recognition)", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
+                    # Try to recognize face using OpenCV recognizer
+                    name = "Unknown"
+                    if self.face_recognizer is not None:
+                        try:
+                            face_roi = gray[y:y+h, x:x+w]
+                            if face_roi.size > 0:
+                                label, confidence = self.face_recognizer.predict(face_roi)
+                                if label in self.face_label_map and confidence < 70:
+                                    name = self.face_label_map[label]
+                                    # Mark attendance
+                                    self.mark_attendance_simple(name)
+                        except Exception as e:
+                            print(f"Face recognition error: {e}")
+                    
+                    cv2.putText(frame, name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
             # Show frame
             cv2.imshow('Face Recognition', frame)
@@ -436,8 +514,21 @@ class SimpleMySQLAttendanceGUI:
                         if not response:
                             return
                         break
+            elif self.face_recognizer is not None:
+                # For OpenCV recognizer, we need grayscale images
+                cv_image = cv2.imread(image_path)
+                if cv_image is not None:
+                    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+                    # Save grayscale version to known_faces directory
+                    student_image_path = os.path.join(self.known_faces_dir, f"{name}.jpg")
+                    cv2.imwrite(student_image_path, gray)
+                    image_path = student_image_path
+                    messagebox.showinfo("Info", "Student registered with OpenCV face recognizer (fallback mode)")
+                else:
+                    messagebox.showerror("Error", "Could not process image")
+                    return
             else:
-                # Allow registration without face recognition
+                # No face recognition available at all
                 messagebox.showinfo("Info", "Face recognition not available. Registering student without face data.")
             
             # Add to database
