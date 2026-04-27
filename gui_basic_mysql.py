@@ -27,6 +27,7 @@ import threading
 import time
 from database_core_mysql import MySQLAttendanceDatabase
 from face_registration_wizard import FaceRegistrationWizard
+from settings_panel import SettingsPanel
 
 class BasicMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -175,8 +176,13 @@ class BasicMySQLAttendanceGUI:
         
         # Register Student with Wizard button
         wizard_btn = ttk.Button(button_frame, text="🧙 Registration Wizard", 
-                               command=self.open_registration_wizard)
+                                command=self.open_registration_wizard)
         wizard_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Settings button
+        settings_btn = ttk.Button(button_frame, text="⚙️ Settings", 
+                                command=self.open_settings_panel)
+        settings_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student with Camera button
         register_camera_btn = ttk.Button(button_frame, text="📹 Register with Camera", 
@@ -275,6 +281,14 @@ class BasicMySQLAttendanceGUI:
             self.load_known_faces()
         except Exception as e:
             messagebox.showerror("Wizard Error", f"Failed to open registration wizard: {e}")
+    
+    def open_settings_panel(self):
+        """Open the settings panel"""
+        try:
+            settings = SettingsPanel(parent=self.root, db=self.db)
+            settings.run()
+        except Exception as e:
+            messagebox.showerror("Settings Error", f"Failed to open settings panel: {e}")
     
     def update_statistics_thread(self):
         """Background thread to update statistics continuously"""
