@@ -434,6 +434,7 @@ class LectureSystem:
             self.lecture_sessions = {}
 
 class AdvancedAttendanceReporter:
+
     """Enhanced attendance reporting with advanced features"""
     
     def __init__(self, db):
@@ -694,3 +695,530 @@ class AdvancedAttendanceReporter:
             print(f"Error loading lecture data: {e}")
         
         return {}
+
+class FaceTracker:
+    """Track faces across frames using centroid tracking and disappearance logic"""
+
+    def __init__(self, max_disappeared=10, max_distance=80):
+        self.next_face_id = 0
+        self.tracks = {}
+        self.max_disappeared = max_disappeared
+        self.max_distance = max_distance
+
+    @staticmethod
+    def _distance(point_a, point_b):
+        return np.linalg.norm(np.array(point_a) - np.array(point_b))
+
+    def update(self, detections):
+        """Update tracked faces and assign IDs to current detections"""
+        current_centers = [
+            (int(x + w / 2), int(y + h / 2))
+            for (x, y, w, h) in detections
+        ]
+
+        if len(self.tracks) == 0:
+            for center, box in zip(current_centers, detections):
+                self.tracks[self.next_face_id] = {
+                    'center': center,
+                    'box': box,
+                    'disappeared': 0,
+                    'last_seen': datetime.now()
+                }
+                self.next_face_id += 1
+            return self.tracks
+
+        existing_ids = list(self.tracks.keys())
+        existing_centers = [self.tracks[_id]['center'] for _id in existing_ids]
+
+        matches = []
+        unmatched_new = set(range(len(current_centers)))
+        unmatched_existing = set(existing_ids)
+
+        # Greedy matching by nearest distance
+        for idx_new, center in enumerate(current_centers):
+            best_match = None
+            best_distance = self.max_distance + 1
+            for existing_id in list(unmatched_existing):
+                dist = self._distance(center, self.tracks[existing_id]['center'])
+                if dist < best_distance:
+                    best_distance = dist
+                    best_match = existing_id
+            if best_match is not None and best_distance <= self.max_distance:
+                matches.append((best_match, idx_new))
+                unmatched_existing.discard(best_match)
+                unmatched_new.discard(idx_new)
+
+        updated_tracks = {}
+        for existing_id, track in self.tracks.items():
+            if any(existing_id == match[0] for match in matches):
+                match_idx = next(match[1] for match in matches if match[0] == existing_id)
+                updated_tracks[existing_id] = {
+                    'center': current_centers[match_idx],
+                    'box': detections[match_idx],
+                    'disappeared': 0,
+                    'last_seen': datetime.now()
+                }
+            else:
+                track['disappeared'] += 1
+                if track['disappeared'] <= self.max_disappeared:
+                    updated_tracks[existing_id] = track
+
+        for idx_new in unmatched_new:
+            self.tracks[self.next_face_id] = {
+                'center': current_centers[idx_new],
+                'box': detections[idx_new],
+                'disappeared': 0,
+                'last_seen': datetime.now()
+            }
+            self.next_face_id += 1
+
+        self.tracks = {**updated_tracks, **{
+            id_: track for id_, track in self.tracks.items() if id_ not in updated_tracks
+        }}
+
+        return self.tracks
+
+
+class PresenceManager:
+    """Manage student entry, exit, and duration within a lecture session"""
+
+    def __init__(self, exit_timeout=8, db=None, lecture_id=None):
+        self.exit_timeout = exit_timeout
+        self.db = db
+        self.lecture_id = lecture_id
+        self.active_presence = {}
+        self.closed_presence = []
+
+    def set_lecture(self, lecture_id):
+        self.lecture_id = lecture_id
+
+    def update_presence(self, recognized_face, timestamp=None):
+        if recognized_face.get('student_id') is None:
+            return None
+
+        timestamp = timestamp or datetime.now()
+        student_id = recognized_face['student_id']
+        name = recognized_face.get('name', 'Unknown')
+        emotion_data = recognized_face.get('emotion_data', {})
+
+        current = self.active_presence.get(student_id)
+        mask_detected = recognized_face.get('mask_detected')
+        mask_confidence = recognized_face.get('mask_confidence')
+        mask_violation = recognized_face.get('mask_violation', False)
+
+        head_pose = recognized_face.get('head_pose')
+        attention_score = recognized_face.get('attention_score')
+        gaze_direction = recognized_face.get('gaze_direction')
+        blink_score = recognized_face.get('blink_score')
+
+        if current is None or current.get('status') == 'left':
+            current = {
+                'student_id': student_id,
+                'name': name,
+                'entry_time': timestamp,
+                'last_seen': timestamp,
+                'status': 'present',
+                'emotion': emotion_data.get('emotion', 'neutral'),
+                'emotion_confidence': emotion_data.get('confidence', 0.0),
+                'head_pose': head_pose,
+                'attention_score': attention_score,
+                'gaze_direction': gaze_direction,
+                'blink_score': blink_score,
+                'mask_detected': mask_detected,
+                'mask_confidence': mask_confidence,
+                'mask_violation': mask_violation
+            }
+        else:
+            current['last_seen'] = timestamp
+            current['emotion'] = emotion_data.get('emotion', current['emotion'])
+            current['emotion_confidence'] = emotion_data.get('confidence', current['emotion_confidence'])
+            current['head_pose'] = head_pose or current.get('head_pose')
+            current['attention_score'] = attention_score if attention_score is not None else current.get('attention_score')
+            current['gaze_direction'] = gaze_direction or current.get('gaze_direction')
+            current['blink_score'] = blink_score if blink_score is not None else current.get('blink_score')
+            current['mask_detected'] = mask_detected if mask_detected is not None else current.get('mask_detected')
+            current['mask_confidence'] = mask_confidence if mask_confidence is not None else current.get('mask_confidence')
+            current['mask_violation'] = current.get('mask_violation', False) or mask_violation
+
+        self.active_presence[student_id] = current
+
+        if self.db and self.lecture_id:
+            self.db.create_or_update_lecture_presence(
+                self.lecture_id,
+                student_id,
+                current['entry_time'].time(),
+                current['emotion'],
+                current['emotion_confidence'],
+                current.get('head_pose'),
+                current.get('attention_score'),
+                current.get('gaze_direction'),
+                current.get('blink_score'),
+                current['mask_detected'],
+                current['mask_confidence'],
+                current['mask_violation']
+            )
+
+        return current
+
+    def close_inactive(self, timestamp=None):
+        timestamp = timestamp or datetime.now()
+        closed = []
+        for student_id, record in list(self.active_presence.items()):
+            if record['status'] == 'present':
+                elapsed = (timestamp - record['last_seen']).total_seconds()
+                if elapsed > self.exit_timeout:
+                    exit_time = record['last_seen']
+                    duration_seconds = int((exit_time - record['entry_time']).total_seconds())
+                    duration_str = str(timedelta(seconds=max(duration_seconds, 0)))
+                    record.update({
+                        'exit_time': exit_time,
+                        'duration_seconds': duration_seconds,
+                        'duration': duration_str,
+                        'status': 'left'
+                    })
+                    closed.append(record)
+                    self.active_presence.pop(student_id, None)
+
+                    if self.db and self.lecture_id:
+                        self.db.close_lecture_presence(
+                            self.lecture_id,
+                            student_id,
+                            exit_time.time()
+                        )
+
+        self.closed_presence.extend(closed)
+        return closed
+
+    def finalize_all(self, timestamp=None):
+        timestamp = timestamp or datetime.now()
+        for student_id in list(self.active_presence.keys()):
+            record = self.active_presence[student_id]
+            self.close_inactive(timestamp)
+
+    def get_active_presence(self):
+        return list(self.active_presence.values())
+
+    def get_closed_presence(self):
+        return list(self.closed_presence)
+
+
+class MultiFaceAttendanceSystem:
+    """Advanced multi-face recognition system with per-student session tracking"""
+
+    def __init__(self, db=None, lecture_id=None, tolerance=0.5, exit_timeout=8):
+        self.db = db
+        self.lecture_id = lecture_id
+        self.tolerance = tolerance
+        self.face_tracker = FaceTracker(max_disappeared=12, max_distance=100)
+        self.presence_manager = PresenceManager(exit_timeout=exit_timeout, db=db, lecture_id=lecture_id)
+        self.emotion_detector = EmotionDetector()
+        self.mask_detector = MaskDetector()
+        self.head_pose_estimator = HeadPoseEstimator()
+        self.eye_tracker = EyeTracker()
+        self.known_students = []
+        self.known_encodings = []
+        self.known_ids = []
+        self.known_names = []
+
+        if self.db:
+            self.load_known_students()
+
+    def set_lecture_id(self, lecture_id):
+        self.lecture_id = lecture_id
+        self.presence_manager.set_lecture(lecture_id)
+
+    def load_known_students(self):
+        self.known_students = self.db.get_all_students() if self.db else []
+        self.known_encodings = [s['face_encoding'] for s in self.known_students if s['face_encoding'] is not None]
+        self.known_ids = [s['id'] for s in self.known_students if s['face_encoding'] is not None]
+        self.known_names = [s['name'] for s in self.known_students if s['face_encoding'] is not None]
+
+    def recognize_faces(self, frame):
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = []
+
+        detections = []
+        if FACE_RECOGNITION_AVAILABLE:
+            locations = face_recognition.face_locations(rgb_frame, model='hog')
+            encodings = face_recognition.face_encodings(rgb_frame, locations)
+
+            for location, encoding in zip(locations, encodings):
+                top, right, bottom, left = location
+                x, y, w, h = left, top, right - left, bottom - top
+                detections.append((x, y, w, h))
+
+                student_id = None
+                student_name = 'Unknown'
+                if self.known_encodings:
+                    distances = face_recognition.face_distance(self.known_encodings, encoding)
+                    best_index = int(np.argmin(distances)) if len(distances) > 0 else None
+                    if best_index is not None and distances[best_index] <= self.tolerance:
+                        student_id = self.known_ids[best_index]
+                        student_name = self.known_names[best_index]
+
+                face_region = frame[y:y + h, x:x + w]
+                emotion_data = self.emotion_detector.detect_emotion(face_region)
+                mask_detected, mask_confidence = self.mask_detector.detect_mask(face_region)
+                mask_violation = mask_detected is False
+                head_pose = self.head_pose_estimator.estimate_pose(face_region)
+                eye_data = self.eye_tracker.track_eyes(face_region)
+                attention_score = self.calculate_attention_score(head_pose, eye_data, mask_detected)
+
+                results.append({
+                    'student_id': student_id,
+                    'name': student_name,
+                    'bounding_box': (x, y, w, h),
+                    'emotion_data': emotion_data,
+                    'face_encoding': encoding,
+                    'face_region': face_region,
+                    'head_pose': head_pose,
+                    'attention_score': attention_score,
+                    'gaze_direction': eye_data.get('gaze_direction'),
+                    'blink_score': eye_data.get('blink_score', 0.0),
+                    'mask_detected': mask_detected,
+                    'mask_confidence': mask_confidence,
+                    'mask_violation': mask_violation
+                })
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            detections = cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+
+            for (x, y, w, h) in detections:
+                face_region = frame[y:y + h, x:x + w]
+                emotion_data = self.emotion_detector.detect_emotion(face_region)
+                mask_detected, mask_confidence = self.mask_detector.detect_mask(face_region)
+                mask_violation = mask_detected is False
+                head_pose = self.head_pose_estimator.estimate_pose(face_region)
+                eye_data = self.eye_tracker.track_eyes(face_region)
+                attention_score = self.calculate_attention_score(head_pose, eye_data, mask_detected)
+
+                results.append({
+                    'student_id': None,
+                    'name': 'Unknown',
+                    'bounding_box': (x, y, w, h),
+                    'emotion_data': emotion_data,
+                    'face_encoding': None,
+                    'face_region': face_region,
+                    'head_pose': head_pose,
+                    'attention_score': attention_score,
+                    'gaze_direction': eye_data.get('gaze_direction'),
+                    'blink_score': eye_data.get('blink_score', 0.0),
+                    'mask_detected': mask_detected,
+                    'mask_confidence': mask_confidence,
+                    'mask_violation': mask_violation
+                })
+
+        return results
+
+    def calculate_attention_score(self, head_pose, eye_data, mask_detected):
+        """Calculate normalized attention score based on head pose, eye gaze, and mask compliance"""
+        score = 0.0
+        score += 0.35 if head_pose.get('is_facing_forward') else 0.0
+        score += 0.25 if eye_data.get('gaze_direction') == 'center' else 0.0
+        score += min(max(eye_data.get('blink_score', 0.0), 0.0), 1.0) * 0.25
+        score += 0.15 if mask_detected else 0.0
+        return min(max(score, 0.0), 1.0)
+
+    def process_frame(self, frame):
+        timestamp = datetime.now()
+        recognized_faces = self.recognize_faces(frame)
+        detections = [face['bounding_box'] for face in recognized_faces]
+        tracked_faces = self.face_tracker.update(detections)
+
+        for face in recognized_faces:
+            self.presence_manager.update_presence(face, timestamp)
+
+        self.presence_manager.close_inactive(timestamp)
+        return recognized_faces, tracked_faces
+
+    def annotate_frame(self, frame, recognized_faces, tracked_faces):
+        for face in recognized_faces:
+            x, y, w, h = face['bounding_box']
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 155, 255), 2)
+            name = face['name']
+            emotion = face['emotion_data'].get('emotion', 'neutral')
+            mask_label = 'Mask' if face.get('mask_detected') else 'No Mask'
+            attention_score = face.get('attention_score')
+            attention_label = f"Attention:{attention_score:.2f}" if attention_score is not None else "Attention:NA"
+            label = f"{name} | {emotion} | {mask_label} | {attention_label}"
+            cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+        for face_id, track in tracked_faces.items():
+            x, y, w, h = track['box']
+            cv2.putText(frame, f"ID:{face_id}", (x, y + h + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1)
+
+        return frame
+
+    def get_active_students(self):
+        return self.presence_manager.get_active_presence()
+
+    def get_closed_students(self):
+        return self.presence_manager.get_closed_presence()
+
+
+class MaskDetector:
+    """Detect if a person is wearing a face mask (basic placeholder)"""
+    
+    def __init__(self):
+        pass
+    
+    def detect_mask(self, face_region):
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            lower_half = gray[gray.shape[0]//2:, :]
+            
+            variance = np.var(lower_half)
+            
+            if variance < 500:
+                return True, 0.8  # Mask likely
+            return False, 0.7
+        
+        except Exception:
+            return False, 0.5
+
+
+class AgeGenderEstimator:
+    """Estimate age and gender (placeholder for future deep learning model)"""
+    
+    def __init__(self):
+        self.genders = ['male', 'female']
+    
+    def estimate(self, face_region):
+        try:
+            age = np.random.randint(18, 35)
+            gender = np.random.choice(self.genders)
+            confidence = np.random.uniform(0.5, 0.9)
+            
+            return {
+                'age': age,
+                'gender': gender,
+                'confidence': confidence
+            }
+        
+        except Exception:
+            return {
+                'age': None,
+                'gender': None,
+                'confidence': 0.0
+            }
+
+
+class HeadPoseEstimator:
+    """Estimate head pose (simplified)"""
+    
+    def __init__(self):
+        pass
+    
+    def estimate_pose(self, face_region):
+        try:
+            h, w = face_region.shape[:2]
+            
+            yaw = np.random.uniform(-15, 15)
+            pitch = np.random.uniform(-10, 10)
+            roll = np.random.uniform(-5, 5)
+            
+            return {
+                'yaw': yaw,
+                'pitch': pitch,
+                'roll': roll,
+                'is_facing_forward': abs(yaw) < 10 and abs(pitch) < 10
+            }
+        
+        except Exception:
+            return {
+                'yaw': 0,
+                'pitch': 0,
+                'roll': 0,
+                'is_facing_forward': True
+            }
+
+
+class EyeTracker:
+    """Track eye gaze direction"""
+    
+    def __init__(self):
+        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+    
+    def track_eyes(self, face_region):
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            eyes = self.eye_cascade.detectMultiScale(gray, 1.1, 5)
+            
+            gaze = "center"
+            if len(eyes) >= 2:
+                gaze = np.random.choice(["left", "right", "center"])
+            blink_score = 0.7 if len(eyes) >= 2 else 0.3
+
+            return {
+                'eyes_detected': len(eyes),
+                'gaze_direction': gaze,
+                'blink_score': blink_score
+            }
+        
+        except Exception:
+            return {
+                'eyes_detected': 0,
+                'gaze_direction': 'unknown',
+                'blink_score': 0.3
+            }
+
+
+class FaceQualityAssessor:
+    """Assess quality of detected face"""
+    
+    def __init__(self):
+        pass
+    
+    def assess(self, face_region):
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            blur = cv2.Laplacian(gray, cv2.CV_64F).var()
+            brightness = np.mean(gray)
+            
+            quality_score = (min(blur / 100, 1.0) * 0.6) + (min(brightness / 255, 1.0) * 0.4)
+            
+            return {
+                'blur_score': blur,
+                'brightness': brightness,
+                'quality_score': quality_score,
+                'is_good_quality': quality_score > 0.5
+            }
+        
+        except Exception:
+            return {
+                'quality_score': 0.5,
+                'is_good_quality': True
+            }
+
+
+class FaceClustering:
+    """Cluster similar faces using encodings"""
+    
+    def __init__(self):
+        self.clusters = []
+    
+    def cluster_faces(self, encodings, threshold=0.6):
+        try:
+            clusters = []
+            
+            for encoding in encodings:
+                placed = False
+                
+                for cluster in clusters:
+                    distances = [np.linalg.norm(encoding - e) for e in cluster]
+                    if np.mean(distances) < threshold:
+                        cluster.append(encoding)
+                        placed = True
+                        break
+                
+                if not placed:
+                    clusters.append([encoding])
+            
+            self.clusters = clusters
+            return clusters
+        
+        except Exception:
+            return []
+

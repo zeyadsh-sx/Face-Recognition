@@ -1,4 +1,4 @@
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request, send_file
 try:
     from flasgger import Swagger
     FLASGGER_AVAILABLE = True
@@ -8,6 +8,7 @@ import json
 from datetime import datetime, date, timedelta
 import os
 from database_core_mysql import MySQLAttendanceDatabase
+from services.export_service import ExportService
 
 app = Flask(__name__, static_folder='frontend', static_url_path='/frontend')
 app.secret_key = 'your-secret-key-here'
@@ -31,6 +32,8 @@ try:
 except Exception as e:
     print(f"❌ MySQL Dashboard connection failed: {e}")
     db = None
+
+export_service = ExportService()
 
 @app.route('/')
 def dashboard():
@@ -350,6 +353,21 @@ def generate_dashboard_html(stats, attendance_records):
     </main>
     <!-- /* ////// main end ////// */ -->
     <script src="/frontend/bootstrap.bundle.min.js"></script>
+    <script>
+        function downloadReport(event) {{
+            event.preventDefault();
+            const startDate = document.getElementById("start-date").value;
+            const endDate = document.getElementById("end-date").value;
+            const format = document.getElementById("export-format").value;
+            if (!startDate || !endDate) {{
+                alert("Please select both start and end dates.");
+                return false;
+            }}
+            const url = `/api/reports/export?start=${{encodeURIComponent(startDate)}}&end=${{encodeURIComponent(endDate)}}&format=${{encodeURIComponent(format)}}`;
+            window.open(url, '_blank');
+            return false;
+        }}
+    </script>
     <script src="/frontend/index.js"></script>
 </body>
 
@@ -491,6 +509,145 @@ def api_stats():
         })
     except Exception as e:
         return jsonify({'error': str(e)})
+    
+
+# ================== NEW API ENDPOINTS ==================
+
+@app.route('/api/search', methods=['GET'])
+def api_search():
+    """Search for student by name"""
+    if not db:
+        return jsonify({'error': 'Database connection failed'})
+    
+    try:
+        query = request.args.get('q', '').lower()
+        students = db.get_all_students()
+        
+        results = [s for s in students if query in s['name'].lower()]
+        
+        return jsonify({
+            'query': query,
+            'results': results,
+            'count': len(results)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/reports', methods=['GET'])
+def api_reports():
+    """Generate attendance report"""
+    if not db:
+        return jsonify({'error': 'Database connection failed'})
+    
+    try:
+        start_date = request.args.get('start')
+        end_date = request.args.get('end')
+        
+        if not start_date or not end_date:
+            return jsonify({'error': 'start and end dates required'})
+        
+        attendance = db.get_attendance_by_date_range(start_date, end_date)
+        
+        return jsonify({
+            'period': f"{start_date} → {end_date}",
+            'total_records': len(attendance),
+            'data': attendance
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/reports/export', methods=['GET'])
+def api_report_export():
+    """Export attendance report in CSV, Excel, PDF or JSON."""
+    if not db:
+        return jsonify({'error': 'Database connection failed'})
+
+    try:
+        start_date = request.args.get('start')
+        end_date = request.args.get('end')
+        export_format = request.args.get('format', 'csv').lower()
+
+        if not start_date or not end_date:
+            return jsonify({'error': 'start and end dates required'})
+
+        data = db.get_attendance_by_date_range(start_date, end_date)
+        if data is None:
+            return jsonify({'error': 'Could not retrieve attendance data'})
+
+        export_dir = os.path.join(os.getcwd(), 'exports')
+        os.makedirs(export_dir, exist_ok=True)
+        base_name = f"attendance_{start_date}_{end_date}"
+
+        if export_format == 'csv':
+            filename = os.path.join(export_dir, f"{base_name}.csv")
+            success, result = export_service.export_to_csv(data, filename)
+        elif export_format == 'excel':
+            filename = os.path.join(export_dir, f"{base_name}.xlsx")
+            success, result = export_service.export_to_excel(data, filename)
+        elif export_format == 'pdf':
+            filename = os.path.join(export_dir, f"{base_name}.pdf")
+            success, result = export_service.export_to_pdf(data, filename, title=f"Attendance Report {start_date} to {end_date}")
+        elif export_format == 'json':
+            filename = os.path.join(export_dir, f"{base_name}.json")
+            success, result = export_service.export_to_json(data, filename)
+        else:
+            return jsonify({'error': 'Invalid export format'}), 400
+
+        if not success:
+            return jsonify({'error': result}), 500
+
+        return send_file(result, as_attachment=True)
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+# ================== FUTURE WORK ENDPOINTS ==================
+
+@app.route('/api/charts', methods=['GET'])
+def api_charts():
+    """Charts data (Future Work)"""
+    return jsonify({
+        'status': 'coming_soon',
+        'message': 'Charts API will provide visualization data'
+    })
+
+
+@app.route('/api/student', methods=['GET'])
+def api_student():
+    """Student details (Future Work)"""
+    return jsonify({
+        'status': 'coming_soon',
+        'message': 'Student API will provide detailed student profile'
+    })
+
+
+@app.route('/api/live', methods=['GET'])
+def api_live():
+    """Live camera feed / detection (Future Work)"""
+    return jsonify({
+        'status': 'coming_soon',
+        'message': 'Live API will stream real-time detection data'
+    })
+
+
+@app.route('/api/alerts', methods=['GET'])
+def api_alerts():
+    """System alerts (Future Work)"""
+    return jsonify({
+        'status': 'coming_soon',
+        'message': 'Alerts API will manage system notifications'
+    })
+
+
+@app.route('/api/analytics', methods=['GET'])
+def api_analytics():
+    """Advanced analytics (Future Work)"""
+    return jsonify({
+        'status': 'coming_soon',
+        'message': 'Analytics API will provide deep insights'
+    })
 
 if __name__ == '__main__':
     print("🚀 Starting Final MySQL Dashboard...")

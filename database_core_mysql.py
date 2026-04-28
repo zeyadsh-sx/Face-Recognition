@@ -2,7 +2,7 @@ import mysql.connector
 from mysql.connector import Error
 import json
 import pickle
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 from typing import Optional, List, Dict, Any
 
@@ -47,11 +47,14 @@ class MySQLAttendanceDatabase:
             
             # Create tables
             self._create_students_table(cursor)
+            self._create_cameras_table(cursor)
             self._create_attendance_table(cursor)
             self._create_face_data_table(cursor)
             self._create_unknown_faces_table(cursor)
             self._create_lecture_sessions_table(cursor)
             self._create_lecture_attendance_table(cursor)
+            self._ensure_attendance_schema(cursor)
+            self._ensure_lecture_attendance_schema(cursor)
             self._create_attendance_alerts_table(cursor)
             self._create_emotion_analytics_table(cursor)
             
@@ -96,13 +99,20 @@ class MySQLAttendanceDatabase:
                 emotion_confidence DECIMAL(5,4),
                 spoofing_score DECIMAL(5,4),
                 is_real_face BOOLEAN DEFAULT TRUE,
+                camera_id INT DEFAULT NULL,
+                mask_detected BOOLEAN DEFAULT NULL,
+                mask_confidence DECIMAL(5,4) DEFAULT NULL,
+                mask_violation BOOLEAN DEFAULT FALSE,
                 lecture_id VARCHAR(100),
                 FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE SET NULL,
                 UNIQUE KEY unique_student_date (student_id, date),
                 INDEX idx_date (date),
                 INDEX idx_student_id (student_id),
+                INDEX idx_camera_id (camera_id),
                 INDEX idx_lecture_id (lecture_id),
-                INDEX idx_emotion (emotion)
+                INDEX idx_emotion (emotion),
+                INDEX idx_mask_violation (mask_violation)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ''')
     
@@ -120,6 +130,23 @@ class MySQLAttendanceDatabase:
                 FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
                 INDEX idx_student_id (student_id),
                 INDEX idx_is_primary (is_primary)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ''')
+
+    def _create_cameras_table(self, cursor):
+        """Create cameras table for multi-camera support"""
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cameras (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                source VARCHAR(500) NOT NULL,
+                location VARCHAR(255) DEFAULT NULL,
+                ip_address VARCHAR(255) DEFAULT NULL,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY unique_camera_source (source),
+                INDEX idx_is_active (is_active)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ''')
     
@@ -164,16 +191,96 @@ class MySQLAttendanceDatabase:
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 lecture_id VARCHAR(100) NOT NULL,
                 student_id INT,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                entry_time TIME NOT NULL,
+                exit_time TIME NULL,
+                duration_seconds INT DEFAULT 0,
+                duration VARCHAR(50) DEFAULT NULL,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 emotion VARCHAR(50),
                 emotion_confidence DECIMAL(5,4),
+                head_pose VARCHAR(255),
+                attention_score DECIMAL(5,4),
+                gaze_direction VARCHAR(50),
+                blink_score DECIMAL(5,4),
+                camera_id INT DEFAULT NULL,
+                mask_detected BOOLEAN DEFAULT NULL,
+                mask_confidence DECIMAL(5,4) DEFAULT NULL,
+                mask_violation BOOLEAN DEFAULT FALSE,
+                status ENUM('present','left') DEFAULT 'present',
                 FOREIGN KEY (lecture_id) REFERENCES lecture_sessions(id) ON DELETE CASCADE,
                 FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+                FOREIGN KEY (camera_id) REFERENCES cameras(id) ON DELETE SET NULL,
                 INDEX idx_lecture_id (lecture_id),
-                INDEX idx_student_id (student_id)
+                INDEX idx_student_id (student_id),
+                INDEX idx_status (status),
+                INDEX idx_camera_id (camera_id),
+                INDEX idx_mask_violation (mask_violation)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ''')
-    
+
+    def _ensure_lecture_attendance_schema(self, cursor):
+        """Ensure lecture attendance table contains new presence tracking columns"""
+        try:
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'entry_time'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN entry_time TIME NOT NULL AFTER student_id")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'exit_time'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN exit_time TIME NULL AFTER entry_time")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'duration_seconds'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN duration_seconds INT DEFAULT 0 AFTER exit_time")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'duration'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN duration VARCHAR(50) DEFAULT NULL AFTER duration_seconds")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'last_seen'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER duration")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'status'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN status ENUM('present','left') DEFAULT 'present' AFTER emotion_confidence")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'head_pose'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN head_pose VARCHAR(255) DEFAULT NULL AFTER emotion_confidence")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'attention_score'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN attention_score DECIMAL(5,4) DEFAULT NULL AFTER head_pose")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'gaze_direction'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN gaze_direction VARCHAR(50) DEFAULT NULL AFTER attention_score")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'blink_score'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN blink_score DECIMAL(5,4) DEFAULT NULL AFTER gaze_direction")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'camera_id'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN camera_id INT DEFAULT NULL AFTER blink_score")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'mask_detected'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN mask_detected BOOLEAN DEFAULT NULL AFTER camera_id")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'mask_confidence'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN mask_confidence DECIMAL(5,4) DEFAULT NULL AFTER mask_detected")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'mask_violation'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN mask_violation BOOLEAN DEFAULT FALSE AFTER mask_confidence")
+            cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'camera_id'")
+            if cursor.fetchone():
+                cursor.execute("ALTER TABLE lecture_attendance ADD INDEX idx_camera_id (camera_id)")
+        except Error as e:
+            print(f"Error ensuring lecture attendance schema: {e}")
+
+    def _ensure_attendance_schema(self, cursor):
+        """Ensure attendance table has camera tracking columns"""
+        try:
+            cursor.execute("SHOW COLUMNS FROM attendance LIKE 'camera_id'")
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE attendance ADD COLUMN camera_id INT DEFAULT NULL AFTER is_real_face")
+            cursor.execute("SHOW COLUMNS FROM attendance LIKE 'camera_id'")
+            if cursor.fetchone():
+                cursor.execute("ALTER TABLE attendance ADD INDEX idx_camera_id (camera_id)")
+        except Error as e:
+            print(f"Error ensuring attendance schema: {e}")
+
     def _create_attendance_alerts_table(self, cursor):
         """Create attendance alerts table"""
         cursor.execute('''
@@ -328,10 +435,293 @@ class MySQLAttendanceDatabase:
     
     # Attendance methods
     def mark_attendance_advanced(self, student_id: int, date_str: str, time_str: str, 
+                                image_path: Optional[str] = None, emotion: Optional[str] = None,
+                                emotion_confidence: Optional[float] = None, 
+                                spoofing_score: Optional[float] = None,
+                                is_real_face: Optional[bool] = None, 
+                                camera_id: Optional[int] = None,
+                                mask_detected: Optional[bool] = None,
+                                mask_confidence: Optional[float] = None,
+                                mask_violation: Optional[bool] = False,
+                                lecture_id: Optional[str] = None) -> tuple[bool, str]:
+        """Mark attendance with advanced validation, anti-spoofing, and alerts"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # ================= VALIDATION =================
+                if not student_id:
+                    return False, "Invalid student ID"
+
+                if not date_str or not time_str:
+                    return False, "Date and time are required"
+
+                # ================= CHECK STUDENT EXISTS =================
+                cursor.execute("SELECT id, status FROM students WHERE id = %s", (student_id,))
+                student = cursor.fetchone()
+
+                if not student:
+                    return False, "Student not found"
+
+                if student[1] != 'active':
+                    return False, f"Student is not active (status: {student[1]})"
+
+                # ================= DUPLICATE CHECK =================
+                cursor.execute('''
+                    SELECT id FROM attendance 
+                    WHERE student_id = %s AND date = %s
+                ''', (student_id, date_str))
+
+                if cursor.fetchone():
+                    return False, f"Attendance already marked for {date_str}"
+
+                # ================= ANTI-SPOOFING CHECK =================
+                if is_real_face is False:
+                    self.create_alert(
+                        "spoofing_attempt",
+                        f"Spoofing attempt detected for student ID {student_id}",
+                        student_id
+                    )
+                    return False, "Fake face detected (spoofing)"
+
+                if mask_violation:
+                    self.create_alert(
+                        "mask_violation",
+                        f"Mask violation detected for student ID {student_id}",
+                        student_id
+                    )
+
+                # ================= INSERT ATTENDANCE =================
+                cursor.execute('''
+                    INSERT INTO attendance 
+                    (student_id, date, time, image_path, emotion, emotion_confidence, 
+                     spoofing_score, is_real_face, camera_id, mask_detected, mask_confidence, mask_violation, lecture_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ''', (
+                    student_id, date_str, time_str, image_path,
+                    emotion, emotion_confidence,
+                    spoofing_score, is_real_face, camera_id,
+                    mask_detected, mask_confidence, mask_violation, lecture_id
+                ))
+
+                cursor.execute('''
+                    INSERT INTO emotion_analytics 
+                    (student_id, date, time, emotion, confidence, context)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (
+                    student_id, date_str, time_str,
+                    emotion, emotion_confidence, 'attendance'
+                ))
+
+                # ================= LATE DETECTION =================
+                try:
+                    hour = int(time_str.split(':')[0])
+                    if hour >= 10:
+                        self.create_alert(
+                            "late_attendance",
+                            f"Student ID {student_id} arrived late at {time_str}",
+                            student_id
+                        )
+                except:
+                    pass
+
+                # ================= LOW CONFIDENCE ALERT =================
+                if emotion_confidence is not None and emotion_confidence < 0.4:
+                    self.create_alert(
+                        "low_confidence",
+                        f"Low emotion confidence detected for student ID {student_id}",
+                        student_id
+                    )
+
+                # ================= LOW SPOOF SCORE ALERT =================
+                if spoofing_score is not None and spoofing_score < 0.3:
+                    self.create_alert(
+                        "suspicious_activity",
+                        f"Low spoofing score for student ID {student_id}",
+                        student_id
+                    )
+
+                return True, "Attendance marked successfully (advanced)"
+
+        except Error as e:
+            print(f"Error marking attendance: {e}")
+            return False, f"Database error: {e}"
+
+    def create_or_update_lecture_presence(self, lecture_id: str, student_id: int, 
+                                          entry_time: datetime.time, emotion: Optional[str] = None,
+                                          emotion_confidence: Optional[float] = None,
+                                          head_pose: Optional[str] = None,
+                                          attention_score: Optional[float] = None,
+                                          gaze_direction: Optional[str] = None,
+                                          blink_score: Optional[float] = None,
+                                          camera_id: Optional[int] = None,
+                                          mask_detected: Optional[bool] = None,
+                                          mask_confidence: Optional[float] = None,
+                                          mask_violation: Optional[bool] = False) -> Optional[int]:
+        """Create or update an open lecture presence record"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id FROM lecture_attendance
+                    WHERE lecture_id = %s AND student_id = %s AND status = 'present'
+                    ORDER BY id DESC
+                    LIMIT 1
+                ''', (lecture_id, student_id))
+                row = cursor.fetchone()
+
+                if row:
+                    attendance_id = row[0]
+                    cursor.execute('''
+                        UPDATE lecture_attendance
+                        SET last_seen = %s, emotion = %s, emotion_confidence = %s,
+                            head_pose = %s, attention_score = %s, gaze_direction = %s,
+                            blink_score = %s, camera_id = %s, mask_detected = %s,
+                            mask_confidence = %s, mask_violation = %s
+                        WHERE id = %s
+                    ''', (
+                        datetime.now(), emotion, emotion_confidence,
+                        head_pose, attention_score, gaze_direction,
+                        blink_score, camera_id, mask_detected, mask_confidence,
+                        mask_violation, attendance_id
+                    ))
+                    if mask_violation:
+                        self.create_alert(
+                            "mask_violation",
+                            f"Mask violation detected for student ID {student_id} in lecture {lecture_id}",
+                            student_id
+                        )
+                    if attention_score is not None and attention_score < 0.45:
+                        self.create_alert(
+                            "inattention_alert",
+                            f"Low attention detected for student ID {student_id} in lecture {lecture_id}",
+                            student_id
+                        )
+                    return attendance_id
+
+                cursor.execute('''
+                    INSERT INTO lecture_attendance
+                    (lecture_id, student_id, entry_time, last_seen, emotion, emotion_confidence,
+                     head_pose, attention_score, gaze_direction, blink_score, camera_id,
+                     mask_detected, mask_confidence, mask_violation, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'present')
+                ''', (
+                    lecture_id, student_id, entry_time, datetime.now(), emotion, emotion_confidence,
+                    head_pose, attention_score, gaze_direction, blink_score, camera_id,
+                    mask_detected, mask_confidence, mask_violation
+                ))
+                attendance_id = cursor.lastrowid
+                if mask_violation:
+                    self.create_alert(
+                        "mask_violation",
+                        f"Mask violation detected for student ID {student_id} in lecture {lecture_id}",
+                        student_id
+                    )
+                if attention_score is not None and attention_score < 0.45:
+                    self.create_alert(
+                        "inattention_alert",
+                        f"Low attention detected for student ID {student_id} in lecture {lecture_id}",
+                        student_id
+                    )
+                self.update_lecture_session_attendance(lecture_id)
+                return attendance_id
+
+        except Error as e:
+            print(f"Error creating/updating lecture presence: {e}")
+            return None
+
+    def close_lecture_presence(self, lecture_id: str, student_id: int, exit_time: datetime.time) -> bool:
+        """Close a student's lecture presence and compute duration"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, entry_time
+                    FROM lecture_attendance
+                    WHERE lecture_id = %s AND student_id = %s AND status = 'present'
+                    ORDER BY id DESC
+                    LIMIT 1
+                ''', (lecture_id, student_id))
+                row = cursor.fetchone()
+
+                if not row:
+                    return False
+
+                attendance_id = row['id']
+                entry_time = row['entry_time']
+                if isinstance(entry_time, str):
+                    entry_time = datetime.strptime(entry_time, '%H:%M:%S').time()
+                seconds = int(
+                    (datetime.combine(datetime.today(), exit_time) - 
+                     datetime.combine(datetime.today(), entry_time)).total_seconds()
+                )
+                duration = str(timedelta(seconds=max(seconds, 0)))
+
+                cursor.execute('''
+                    UPDATE lecture_attendance
+                    SET exit_time = %s,
+                        duration_seconds = %s,
+                        duration = %s,
+                        status = 'left',
+                        last_seen = %s
+                    WHERE id = %s
+                ''', (exit_time, seconds, duration, datetime.now(), attendance_id))
+
+                self.update_lecture_session_attendance(lecture_id)
+                return True
+
+        except Error as e:
+            print(f"Error closing lecture presence: {e}")
+            return False
+
+    def update_lecture_session_attendance(self, lecture_id: str) -> bool:
+        """Update total attendee count for a lecture session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE lecture_sessions
+                    SET total_attendees = (
+                        SELECT COUNT(DISTINCT student_id)
+                        FROM lecture_attendance
+                        WHERE lecture_id = %s
+                    )
+                    WHERE id = %s
+                ''', (lecture_id, lecture_id))
+                return cursor.rowcount > 0
+        except Error as e:
+            print(f"Error updating lecture session attendance count: {e}")
+            return False
+
+    def get_lecture_presence(self, lecture_id: str) -> List[Dict]:
+        """Get detailed presence records for a lecture session"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT la.id, la.lecture_id, la.student_id, s.name AS student_name,
+                           la.entry_time, la.exit_time, la.duration_seconds, la.duration,
+                           la.status, la.last_seen, la.emotion, la.emotion_confidence,
+                           la.head_pose, la.attention_score, la.gaze_direction, la.blink_score,
+                           la.mask_detected, la.mask_confidence, la.mask_violation
+                    FROM lecture_attendance la
+                    LEFT JOIN students s ON la.student_id = s.id
+                    WHERE la.lecture_id = %s
+                    ORDER BY la.entry_time, la.student_id
+                ''', (lecture_id,))
+                return list(cursor.fetchall())
+        except Error as e:
+            print(f"Error fetching lecture presence records: {e}")
+            return []
+
+    def mark_attendance(self, student_id: int, date_str: str, time_str: str,
                               image_path: Optional[str] = None, emotion: Optional[str] = None,
                               emotion_confidence: Optional[float] = None, 
                               spoofing_score: Optional[float] = None,
-                              is_real_face: Optional[bool] = None, 
+                              is_real_face: Optional[bool] = None,
+                              mask_detected: Optional[bool] = None,
+                              mask_confidence: Optional[float] = None,
+                              mask_violation: Optional[bool] = False,
                               lecture_id: Optional[str] = None) -> tuple[bool, str]:
         """Mark attendance with advanced features"""
         try:
@@ -347,14 +737,22 @@ class MySQLAttendanceDatabase:
                 if cursor.fetchone():
                     return False, f"Attendance already marked for {date_str}"
                 
+                if mask_violation:
+                    self.create_alert(
+                        "mask_violation",
+                        f"Mask violation detected for student ID {student_id}",
+                        student_id
+                    )
+                
                 # Insert attendance record
                 cursor.execute('''
                     INSERT INTO attendance 
                     (student_id, date, time, image_path, emotion, emotion_confidence, 
-                     spoofing_score, is_real_face, lecture_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     spoofing_score, is_real_face, mask_detected, mask_confidence, mask_violation, lecture_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ''', (student_id, date_str, time_str, image_path, emotion, 
-                       emotion_confidence, spoofing_score, is_real_face, lecture_id))
+                       emotion_confidence, spoofing_score, is_real_face,
+                       mask_detected, mask_confidence, mask_violation, lecture_id))
                 
                 # Record emotion analytics if available
                 if emotion:
@@ -371,13 +769,14 @@ class MySQLAttendanceDatabase:
             return False, f"Error marking attendance: {e}"
     
     def get_attendance_with_emotions(self, date_str: str) -> List[Dict]:
-        """Get attendance with emotion data"""
+        """Get attendance with emotion and mask data"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute('''
                     SELECT s.name, a.time, a.image_path, a.timestamp, a.emotion, 
-                           a.emotion_confidence, a.spoofing_score, a.is_real_face
+                           a.emotion_confidence, a.spoofing_score, a.is_real_face,
+                           a.camera_id, a.mask_detected, a.mask_confidence, a.mask_violation
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id
                     WHERE a.date = %s
@@ -396,7 +795,8 @@ class MySQLAttendanceDatabase:
             with self.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute('''
-                    SELECT s.name, a.date, a.time, a.image_path, a.timestamp, a.emotion
+                    SELECT s.name, a.date, a.time, a.image_path, a.timestamp, a.emotion,
+                           a.mask_detected, a.mask_confidence, a.mask_violation
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id
                     WHERE a.date BETWEEN %s AND %s
@@ -575,6 +975,38 @@ class MySQLAttendanceDatabase:
             return False
     
     # Statistics and analytics methods
+    def get_compliance_statistics(self, start_date: str, end_date: str) -> Dict:
+        """Get mask compliance statistics for a date range"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT
+                        COUNT(*) AS total_records,
+                        SUM(CASE WHEN mask_detected = TRUE THEN 1 ELSE 0 END) AS masked_records,
+                        SUM(CASE WHEN mask_violation = TRUE THEN 1 ELSE 0 END) AS violations
+                    FROM attendance
+                    WHERE date BETWEEN %s AND %s
+                ''', (start_date, end_date))
+                stats = cursor.fetchone() or {}
+
+                total = stats.get('total_records') or 0
+                masked = stats.get('masked_records') or 0
+                violations = stats.get('violations') or 0
+                compliance_rate = ((masked / total) * 100) if total > 0 else 0.0
+
+                return {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'total_records': total,
+                    'masked_records': masked,
+                    'violations': violations,
+                    'compliance_rate': round(compliance_rate, 1)
+                }
+        except Error as e:
+            print(f"Error getting compliance statistics: {e}")
+            return {}
+
     def get_comprehensive_statistics(self, start_date: str, end_date: str) -> Dict:
         """Get comprehensive statistics for reporting"""
         try:
@@ -683,6 +1115,84 @@ class MySQLAttendanceDatabase:
                 return True
         except Error as e:
             print(f"Connection test failed: {e}")
+            return False
+
+    def add_camera(self, camera_name: str, source: str, location: str = None, ip_address: str = None, is_active: bool = True) -> Optional[int]:
+        """Add a camera source to the system."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO cameras (name, source, location, ip_address, is_active)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        name = VALUES(name),
+                        location = VALUES(location),
+                        ip_address = VALUES(ip_address),
+                        is_active = VALUES(is_active),
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (camera_name, source, location, ip_address, is_active))
+                cursor.execute('SELECT id FROM cameras WHERE source = %s', (source,))
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Error as e:
+            print(f"Error adding camera: {e}")
+            return None
+
+    def get_all_cameras(self) -> List[Dict]:
+        """Return all registered cameras."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, source, location, ip_address, is_active, created_at, updated_at
+                    FROM cameras
+                    ORDER BY name
+                ''')
+                return list(cursor.fetchall())
+        except Error as e:
+            print(f"Error getting cameras: {e}")
+            return []
+
+    def get_camera_by_source(self, source: str) -> Optional[Dict]:
+        """Return a camera record by its source string."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, source, location, ip_address, is_active, created_at, updated_at
+                    FROM cameras
+                    WHERE source = %s
+                    LIMIT 1
+                ''', (source,))
+                return cursor.fetchone()
+        except Error as e:
+            print(f"Error getting camera by source: {e}")
+            return None
+
+    def get_camera_by_id(self, camera_id: int) -> Optional[Dict]:
+        """Return a camera record by its ID."""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, source, location, ip_address, is_active, created_at, updated_at
+                    FROM cameras
+                    WHERE id = %s
+                ''', (camera_id,))
+                return cursor.fetchone()
+        except Error as e:
+            print(f"Error getting camera by ID: {e}")
+            return None
+
+    def add_notification(self, message: str, notification_type: str = "info") -> bool:
+        """Add system notification using alerts table"""
+        try:
+            alert_type = notification_type
+            self.create_alert(alert_type, message)
+            return True
+        except Exception as e:
+            print(f"Error adding notification: {e}")
             return False
 
 # Configuration and setup helper
