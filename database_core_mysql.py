@@ -443,21 +443,35 @@ class MySQLAttendanceDatabase:
                                 mask_detected: Optional[bool] = None,
                                 mask_confidence: Optional[float] = None,
                                 mask_violation: Optional[bool] = False,
-                                lecture_id: Optional[str] = None) -> tuple[bool, str]:
-        """Mark attendance with advanced validation, anti-spoofing, and alerts"""
+                                lecture_id: Optional[str] = None,
+                                head_pose: Optional[str] = None,
+                                attention_score: Optional[float] = None,
+                                gaze_direction: Optional[str] = None,
+                                blink_score: Optional[float] = None,
+                                face_quality_score: Optional[float] = None,
+                                location_coordinates: Optional[str] = None,
+                                device_info: Optional[str] = None) -> tuple[bool, str]:
+        """Enhanced attendance marking with comprehensive validation and analytics"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # ================= VALIDATION =================
+                # ================= COMPREHENSIVE VALIDATION =================
                 if not student_id:
                     return False, "Invalid student ID"
 
                 if not date_str or not time_str:
                     return False, "Date and time are required"
 
+                # Validate date format
+                try:
+                    datetime.strptime(date_str, '%Y-%m-%d')
+                    datetime.strptime(time_str, '%H:%M:%S')
+                except ValueError:
+                    return False, "Invalid date or time format. Use YYYY-MM-DD and HH:MM:SS"
+
                 # ================= CHECK STUDENT EXISTS =================
-                cursor.execute("SELECT id, status FROM students WHERE id = %s", (student_id,))
+                cursor.execute("SELECT id, status, name FROM students WHERE id = %s", (student_id,))
                 student = cursor.fetchone()
 
                 if not student:
@@ -465,6 +479,8 @@ class MySQLAttendanceDatabase:
 
                 if student[1] != 'active':
                     return False, f"Student is not active (status: {student[1]})"
+
+                student_name = student[2]
 
                 # ================= DUPLICATE CHECK =================
                 cursor.execute('''
@@ -475,23 +491,32 @@ class MySQLAttendanceDatabase:
                 if cursor.fetchone():
                     return False, f"Attendance already marked for {date_str}"
 
-                # ================= ANTI-SPOOFING CHECK =================
+                # ================= ADVANCED ANTI-SPOOFING CHECK =================
                 if is_real_face is False:
                     self.create_alert(
                         "spoofing_attempt",
-                        f"Spoofing attempt detected for student ID {student_id}",
+                        f"Spoofing attempt detected for student {student_name} (ID: {student_id})",
                         student_id
                     )
                     return False, "Fake face detected (spoofing)"
 
-                if mask_violation:
+                # Enhanced spoofing analysis
+                if spoofing_score is not None and spoofing_score < 0.3:
                     self.create_alert(
-                        "mask_violation",
-                        f"Mask violation detected for student ID {student_id}",
+                        "suspicious_activity",
+                        f"Very low spoofing score ({spoofing_score:.3f}) for student {student_name}",
                         student_id
                     )
 
-                # ================= INSERT ATTENDANCE =================
+                # ================= MASK COMPLIANCE CHECK =================
+                if mask_violation:
+                    self.create_alert(
+                        "mask_violation",
+                        f"Mask violation detected for student {student_name} (ID: {student_id})",
+                        student_id
+                    )
+
+                # ================= INSERT ENHANCED ATTENDANCE =================
                 cursor.execute('''
                     INSERT INTO attendance 
                     (student_id, date, time, image_path, emotion, emotion_confidence, 
@@ -504,48 +529,194 @@ class MySQLAttendanceDatabase:
                     mask_detected, mask_confidence, mask_violation, lecture_id
                 ))
 
-                cursor.execute('''
-                    INSERT INTO emotion_analytics 
-                    (student_id, date, time, emotion, confidence, context)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                ''', (
-                    student_id, date_str, time_str,
-                    emotion, emotion_confidence, 'attendance'
-                ))
+                attendance_id = cursor.lastrowid
 
-                # ================= LATE DETECTION =================
+                # ================= ENHANCED EMOTION ANALYTICS =================
+                if emotion:
+                    cursor.execute('''
+                        INSERT INTO emotion_analytics 
+                        (student_id, date, time, emotion, confidence, context)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    ''', (
+                        student_id, date_str, time_str,
+                        emotion, emotion_confidence, 'attendance'
+                    ))
+
+                # ================= LATE ARRIVAL DETECTION =================
                 try:
                     hour = int(time_str.split(':')[0])
-                    if hour >= 10:
+                    minute = int(time_str.split(':')[1])
+                    
+                    # Enhanced late detection with multiple thresholds
+                    if hour > 10 or (hour == 10 and minute > 30):
+                        late_type = "very_late" if hour > 11 else "late"
                         self.create_alert(
                             "late_attendance",
-                            f"Student ID {student_id} arrived late at {time_str}",
+                            f"Student {student_name} arrived {late_type} at {time_str}",
+                            student_id
+                        )
+                    elif hour > 9 or (hour == 9 and minute > 15):
+                        self.create_alert(
+                            "late_attendance",
+                            f"Student {student_name} arrived slightly late at {time_str}",
                             student_id
                         )
                 except:
                     pass
 
-                # ================= LOW CONFIDENCE ALERT =================
-                if emotion_confidence is not None and emotion_confidence < 0.4:
+                # ================= QUALITY AND ATTENTION ANALYSIS =================
+                if face_quality_score is not None and face_quality_score < 0.5:
                     self.create_alert(
-                        "low_confidence",
-                        f"Low emotion confidence detected for student ID {student_id}",
+                        "low_quality_detection",
+                        f"Low face quality ({face_quality_score:.3f}) for student {student_name}",
                         student_id
                     )
 
-                # ================= LOW SPOOF SCORE ALERT =================
-                if spoofing_score is not None and spoofing_score < 0.3:
+                if attention_score is not None and attention_score < 0.4:
                     self.create_alert(
-                        "suspicious_activity",
-                        f"Low spoofing score for student ID {student_id}",
+                        "inattention_alert",
+                        f"Low attention score ({attention_score:.3f}) detected for student {student_name}",
                         student_id
                     )
 
-                return True, "Attendance marked successfully (advanced)"
+                # ================= COMPREHENSIVE ANALYTICS RECORDING =================
+                analytics_data = {
+                    'head_pose': head_pose,
+                    'attention_score': attention_score,
+                    'gaze_direction': gaze_direction,
+                    'blink_score': blink_score,
+                    'face_quality_score': face_quality_score,
+                    'location_coordinates': location_coordinates,
+                    'device_info': device_info
+                }
+
+                # Store analytics data if any is provided
+                if any(analytics_data.values()):
+                    try:
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS attendance_analytics (
+                                id INT AUTO_INCREMENT PRIMARY KEY,
+                                attendance_id INT NOT NULL,
+                                head_pose VARCHAR(255),
+                                attention_score DECIMAL(5,4),
+                                gaze_direction VARCHAR(50),
+                                blink_score DECIMAL(5,4),
+                                face_quality_score DECIMAL(5,4),
+                                location_coordinates VARCHAR(100),
+                                device_info VARCHAR(255),
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                FOREIGN KEY (attendance_id) REFERENCES attendance(id) ON DELETE CASCADE,
+                                INDEX idx_attendance_id (attendance_id)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        ''')
+                        
+                        cursor.execute('''
+                            INSERT INTO attendance_analytics 
+                            (attendance_id, head_pose, attention_score, gaze_direction, blink_score,
+                             face_quality_score, location_coordinates, device_info)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ''', (
+                            attendance_id, head_pose, attention_score, gaze_direction, blink_score,
+                            face_quality_score, location_coordinates, device_info
+                        ))
+                    except Error as e:
+                        print(f"Error storing analytics data: {e}")
+
+                # ================= LECTURE SESSION INTEGRATION =================
+                if lecture_id:
+                    self.create_or_update_lecture_presence(
+                        lecture_id, student_id, datetime.strptime(time_str, '%H:%M:%S').time(),
+                        emotion, emotion_confidence, head_pose, attention_score,
+                        gaze_direction, blink_score, camera_id, mask_detected, mask_confidence, mask_violation
+                    )
+
+                # ================= NOTIFICATION SYSTEM =================
+                if emotion_confidence is not None and emotion_confidence < 0.3:
+                    self.add_notification(
+                        f"Low emotion confidence ({emotion_confidence:.3f}) detected for {student_name}",
+                        "warning", "medium", student_id
+                    )
+
+                # ================= SUCCESS RESPONSE =================
+                success_message = f"Attendance marked successfully for {student_name}"
+                if emotion:
+                    success_message += f" (emotion: {emotion})"
+                if mask_detected:
+                    success_message += f" (mask: {'worn' if mask_detected else 'not worn'})"
+                if face_quality_score:
+                    success_message += f" (quality: {face_quality_score:.3f})"
+
+                return True, success_message
 
         except Error as e:
             print(f"Error marking attendance: {e}")
             return False, f"Database error: {e}"
+    
+    def get_student_attendance_by_date(self, student_id: int, date_str: str) -> List[Dict]:
+        """Get student attendance for a specific date"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT a.*, aa.head_pose, aa.attention_score, aa.gaze_direction, 
+                           aa.blink_score, aa.face_quality_score, aa.location_coordinates, aa.device_info
+                    FROM attendance a
+                    LEFT JOIN attendance_analytics aa ON a.id = aa.attendance_id
+                    WHERE a.student_id = %s AND a.date = %s
+                    ORDER BY a.time
+                ''', (student_id, date_str))
+                return list(cursor.fetchall())
+        except Error as e:
+            print(f"Error getting student attendance by date: {e}")
+            return []
+    
+    def get_student_attendance(self, student_id: int, limit: int = 100) -> List[Dict]:
+        """Get student attendance history"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT a.*, aa.head_pose, aa.attention_score, aa.gaze_direction, 
+                           aa.blink_score, aa.face_quality_score, aa.location_coordinates, aa.device_info
+                    FROM attendance a
+                    LEFT JOIN attendance_analytics aa ON a.id = aa.attendance_id
+                    WHERE a.student_id = %s
+                    ORDER BY a.date DESC, a.time DESC
+                    LIMIT %s
+                ''', (student_id, limit))
+                return list(cursor.fetchall())
+        except Error as e:
+            print(f"Error getting student attendance: {e}")
+            return []
+    
+    def get_student_by_id(self, student_id: int) -> Optional[Dict]:
+        """Get student by ID with full details"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, face_encoding, image_path, status, notes, created_at, updated_at
+                    FROM students 
+                    WHERE id = %s
+                ''', (student_id,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'id': row['id'],
+                        'name': row['name'],
+                        'face_encoding': pickle.loads(row['face_encoding']) if row['face_encoding'] else None,
+                        'image_path': row['image_path'],
+                        'status': row['status'],
+                        'notes': row['notes'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at']
+                    }
+                return None
+                
+        except Error as e:
+            print(f"Error getting student by ID: {e}")
+            return None
 
     def create_or_update_lecture_presence(self, lecture_id: str, student_id: int, 
                                           entry_time: datetime.time, emotion: Optional[str] = None,
@@ -1118,26 +1289,92 @@ class MySQLAttendanceDatabase:
             return False
 
     def add_camera(self, camera_name: str, source: str, location: str = None, ip_address: str = None, is_active: bool = True) -> Optional[int]:
-        """Add a camera source to the system."""
+        """Add a camera source to the system with enhanced validation"""
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                
+                # Validate inputs
+                if not camera_name or not source:
+                    print("Error: Camera name and source are required")
+                    return None
+                
+                # Check if source already exists
+                cursor.execute("SELECT id FROM cameras WHERE source = %s", (source,))
+                if cursor.fetchone():
+                    print(f"Warning: Camera source '{source}' already exists")
+                    cursor.execute("SELECT id FROM cameras WHERE source = %s", (source,))
+                    return cursor.fetchone()[0]
+                
+                # Insert new camera
                 cursor.execute('''
                     INSERT INTO cameras (name, source, location, ip_address, is_active)
                     VALUES (%s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE
-                        name = VALUES(name),
-                        location = VALUES(location),
-                        ip_address = VALUES(ip_address),
-                        is_active = VALUES(is_active),
-                        updated_at = CURRENT_TIMESTAMP
                 ''', (camera_name, source, location, ip_address, is_active))
-                cursor.execute('SELECT id FROM cameras WHERE source = %s', (source,))
-                row = cursor.fetchone()
-                return row[0] if row else None
+                
+                camera_id = cursor.lastrowid
+                
+                # Log camera addition
+                self.create_alert(
+                    "camera_added",
+                    f"Camera '{camera_name}' added successfully",
+                    None
+                )
+                
+                print(f"Camera '{camera_name}' added with ID: {camera_id}")
+                return camera_id
+                
         except Error as e:
             print(f"Error adding camera: {e}")
             return None
+    
+    def update_camera(self, camera_id: int, **kwargs) -> bool:
+        """Update camera information"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Build update query dynamically
+                update_fields = []
+                values = []
+                
+                for field, value in kwargs.items():
+                    if field in ['name', 'source', 'location', 'ip_address', 'is_active']:
+                        update_fields.append(f"{field} = %s")
+                        values.append(value)
+                
+                if not update_fields:
+                    return False
+                
+                values.append(camera_id)
+                query = f"UPDATE cameras SET {', '.join(update_fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
+                
+                cursor.execute(query, values)
+                return cursor.rowcount > 0
+                
+        except Error as e:
+            print(f"Error updating camera: {e}")
+            return False
+    
+    def deactivate_camera(self, camera_id: int) -> bool:
+        """Deactivate a camera"""
+        return self.update_camera(camera_id, is_active=False)
+    
+    def get_active_cameras(self) -> List[Dict]:
+        """Get all active cameras"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                cursor.execute('''
+                    SELECT id, name, source, location, ip_address, created_at, updated_at
+                    FROM cameras
+                    WHERE is_active = TRUE
+                    ORDER BY name
+                ''')
+                return list(cursor.fetchall())
+        except Error as e:
+            print(f"Error getting active cameras: {e}")
+            return []
 
     def get_all_cameras(self) -> List[Dict]:
         """Return all registered cameras."""
@@ -1185,15 +1422,158 @@ class MySQLAttendanceDatabase:
             print(f"Error getting camera by ID: {e}")
             return None
 
-    def add_notification(self, message: str, notification_type: str = "info") -> bool:
-        """Add system notification using alerts table"""
+    def add_notification(self, message: str, notification_type: str = "info", 
+                          priority: str = "medium", student_id: Optional[int] = None,
+                          action_url: Optional[str] = None, expires_at: Optional[datetime] = None) -> bool:
+        """Add system notification with enhanced features"""
         try:
-            alert_type = notification_type
-            self.create_alert(alert_type, message)
-            return True
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Validate notification type
+                valid_types = ['info', 'warning', 'error', 'success', 'security', 'attendance', 'system']
+                if notification_type not in valid_types:
+                    notification_type = 'info'
+                
+                # Validate priority
+                valid_priorities = ['low', 'medium', 'high', 'critical']
+                if priority not in valid_priorities:
+                    priority = 'medium'
+                
+                # Create alert with enhanced information
+                alert_id = self.create_alert(notification_type, message, student_id)
+                
+                if alert_id:
+                    # Add notification metadata to a separate table if it exists
+                    try:
+                        cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS notifications (
+                                id INT AUTO_INCREMENT PRIMARY KEY,
+                                alert_id INT NOT NULL,
+                                message TEXT NOT NULL,
+                                notification_type VARCHAR(20) DEFAULT 'info',
+                                priority ENUM('low', 'medium', 'high', 'critical') DEFAULT 'medium',
+                                student_id INT,
+                                action_url VARCHAR(500),
+                                expires_at TIMESTAMP NULL,
+                                read_at TIMESTAMP NULL,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                FOREIGN KEY (alert_id) REFERENCES attendance_alerts(id) ON DELETE CASCADE,
+                                FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE SET NULL,
+                                INDEX idx_notification_type (notification_type),
+                                INDEX idx_priority (priority),
+                                INDEX idx_expires_at (expires_at),
+                                INDEX idx_read_at (read_at)
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        ''')
+                        
+                        cursor.execute('''
+                            INSERT INTO notifications 
+                            (alert_id, message, notification_type, priority, student_id, action_url, expires_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        ''', (alert_id, message, notification_type, priority, student_id, action_url, expires_at))
+                        
+                        print(f"Notification added: {notification_type} - {message}")
+                        return True
+                        
+                    except Error as e:
+                        print(f"Error creating notification record: {e}")
+                        # Fallback: alert was created successfully even if notification table failed
+                        return True
+                
+                return False
+                
         except Exception as e:
             print(f"Error adding notification: {e}")
             return False
+    
+    def get_notifications(self, limit: int = 50, unread_only: bool = False, 
+                         notification_type: Optional[str] = None) -> List[Dict]:
+        """Get system notifications"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                
+                # Check if notifications table exists
+                cursor.execute("SHOW TABLES LIKE 'notifications'")
+                if not cursor.fetchone():
+                    # Fallback to alerts table
+                    return self.get_active_alerts()
+                
+                # Build query
+                query = '''
+                    SELECT n.id, n.message, n.notification_type, n.priority, n.student_id,
+                           n.action_url, n.expires_at, n.read_at, n.created_at,
+                           s.name as student_name
+                    FROM notifications n
+                    LEFT JOIN students s ON n.student_id = s.id
+                '''
+                conditions = []
+                params = []
+                
+                if unread_only:
+                    conditions.append("n.read_at IS NULL")
+                
+                if notification_type:
+                    conditions.append("n.notification_type = %s")
+                    params.append(notification_type)
+                
+                if conditions:
+                    query += " WHERE " + " AND ".join(conditions)
+                    
+                query += '''
+                    ORDER BY 
+                        CASE n.priority
+                            WHEN 'critical' THEN 1
+                            WHEN 'high' THEN 2
+                            WHEN 'medium' THEN 3
+                            WHEN 'low' THEN 4
+                        END,
+                        n.created_at DESC
+                    LIMIT %s
+                '''
+                params.append(limit)
+                
+                cursor.execute(query, params)
+                return list(cursor.fetchall())
+                
+        except Error as e:
+            print(f"Error getting notifications: {e}")
+            return []
+    
+    def mark_notification_read(self, notification_id: int) -> bool:
+        """Mark notification as read"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE notifications 
+                    SET read_at = CURRENT_TIMESTAMP 
+                    WHERE id = %s AND read_at IS NULL
+                ''', (notification_id,))
+                return cursor.rowcount > 0
+        except Error as e:
+            print(f"Error marking notification as read: {e}")
+            return False
+    
+    def cleanup_expired_notifications(self) -> int:
+        """Clean up expired notifications"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    DELETE FROM notifications 
+                    WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP
+                ''')
+                deleted_count = cursor.rowcount
+                
+                if deleted_count > 0:
+                    print(f"Cleaned up {deleted_count} expired notifications")
+                
+                return deleted_count
+        except Error as e:
+            print(f"Error cleaning up expired notifications: {e}")
+            return 0
 
 # Configuration and setup helper
 def setup_mysql_database():

@@ -204,6 +204,22 @@ class ExportService:
 
         return True, filepath
 
+    def export_to_generic(self, data, filename):
+        """Generic export function that detects format from extension"""
+        try:
+            if filename.endswith('.json'):
+                return self.export_to_json(data, filename)
+            elif filename.endswith('.csv'):
+                return self.export_to_csv(data, filename)
+            elif filename.endswith('.xlsx') or filename.endswith('.xls'):
+                return self.export_to_excel(data, filename)
+            elif filename.endswith('.pdf'):
+                return self.export_to_pdf(data, filename)
+            else:
+                return False, f"Unsupported format: {filename}"
+        except Exception as e:
+            return False, f"Generic export error: {str(e)}"
+
     def export_to_json(self, data, filename="export.json"):
         try:
             filepath = self._ensure_dir(filename)

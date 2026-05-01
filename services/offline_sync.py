@@ -6,7 +6,7 @@ import os
 import pickle
 from typing import Optional
 
-from services.local_database import SQLiteAttendanceDatabase
+# from services.local_database import SQLiteAttendanceDatabase
 
 
 class OfflineSyncService:

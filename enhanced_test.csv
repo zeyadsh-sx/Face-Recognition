@@ -1,0 +1,11 @@
+student_id,name,date,time,emotion,emotion_confidence,spoofing_score,is_real_face,camera_id,mask_detected,mask_confidence,mask_violation,lecture_id,head_pose,attention_score,gaze_direction,blink_score,face_quality_score,location_coordinates,device_info
+1,Enhanced Test Student 1,2026-05-01,9:00,happy,0.5,0.8,False,,True,0.7,True,lecture_0,frontal,0.6,forward,0.5,0.7,"x:100,y:200",Test Device v1
+1,Enhanced Test Student 2,2026-04-30,10:06,neutral,0.55,0.82,True,1,False,0.8,False,lecture_1,left,0.64,left,0.58,0.73,"x:110,y:215",Test Device v2
+1,Enhanced Test Student 3,2026-04-29,11:12,sad,0.6,0.84,True,1,True,0.9,False,lecture_2,right,0.68,right,0.66,0.76,"x:120,y:230",Test Device v3
+1,Enhanced Test Student 4,2026-04-28,12:18,surprise,0.65,0.86,True,,False,1.0,False,lecture_0,up,0.72,up,0.74,0.79,"x:130,y:245",Test Device v4
+1,Enhanced Test Student 5,2026-04-27,13:24,angry,0.7,0.88,True,1,True,1.1,False,lecture_1,down,0.76,down,0.82,0.82,"x:140,y:260",Test Device v5
+1,Enhanced Test Student 6,2026-04-26,14:30,fear,0.75,0.9,False,1,False,1.2,False,lecture_2,frontal,0.8,forward,0.9,0.85,"x:150,y:275",Test Device v6
+1,Enhanced Test Student 7,2026-04-25,15:36,happy,0.8,0.92,True,,True,1.3,False,lecture_0,left,0.84,left,0.98,0.88,"x:160,y:290",Test Device v7
+1,Enhanced Test Student 8,2026-04-24,16:42,neutral,0.85,0.94,True,1,False,1.4,True,lecture_1,right,0.88,right,1.06,0.91,"x:170,y:305",Test Device v8
+1,Enhanced Test Student 9,2026-04-23,17:48,sad,0.9,0.96,True,1,True,1.5,False,lecture_2,up,0.92,up,1.14,0.94,"x:180,y:320",Test Device v9
+1,Enhanced Test Student 10,2026-04-22,18:54,surprise,0.95,0.98,True,,False,1.6,False,lecture_0,down,0.96,down,1.22,0.97,"x:190,y:335",Test Device v10

@@ -1,0 +1,22 @@
+{
+  "report_date": "2026-05-01",
+  "generated_at": "2026-05-01T18:33:41.062025",
+  "attendance_stats": {
+    "period": "2026-05-01 to 2026-05-01",
+    "attendance": {
+      "total_present": 1,
+      "total_records": 1,
+      "avg_emotion_confidence": 0.85,
+      "avg_spoofing_score": 0.0
+    },
+    "emotions": {
+      "happy": 1
+    },
+    "lectures": {
+      "total_lectures": 0,
+      "avg_attendance": 0.0,
+      "avg_engagement": 0.0
+    }
+  },
+  "system_status": "operational"
+}

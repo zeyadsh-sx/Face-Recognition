@@ -220,9 +220,14 @@ class BasicMySQLAttendanceGUI:
             
             for student in students:
                 if student.get('face_encoding'):
-                    encoding = np.fromstring(student['face_encoding'], sep=',')
-                    known_face_encodings.append(encoding)
-                    known_face_names.append(student['name'])
+                    try:
+                        encoding = np.fromstring(student['face_encoding'], sep=',')
+                        if encoding.size > 0 and np.any(encoding):  # Use np.any() instead of direct boolean
+                            known_face_encodings.append(encoding)
+                            known_face_names.append(student['name'])
+                    except Exception as encoding_error:
+                        print(f"Error processing encoding for student {student.get('name', 'Unknown')}: {encoding_error}")
+                        continue
             
             self.known_face_encodings = known_face_encodings
             self.known_face_names = known_face_names

@@ -6,6 +6,13 @@ try:
 except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
     print("Warning: face_recognition not available, using fallback methods")
+
+try:
+    from deepface import DeepFace
+    DEEPFACE_AVAILABLE = True
+except ImportError:
+    DEEPFACE_AVAILABLE = False
+    print("Warning: deepface not available, emotion analysis disabled")
 from datetime import datetime
 import os
 import json
@@ -174,12 +181,29 @@ class EmotionDetector:
             # Convert to grayscale for processing
             gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
             
-            # Simplified emotion detection based on facial features
-            # In practice, you would use a deep learning model like:
-            # - FER (Facial Expression Recognition)
-            # - DeepFace
-            # - Custom CNN model
+            # Try to use DeepFace for emotion detection if available
+            if DEEPFACE_AVAILABLE:
+                try:
+                    emotion_analysis = DeepFace.analyze(
+                        face_region, 
+                        actions=['emotion'],
+                        enforce_detection=False
+                    )
+                    if isinstance(emotion_analysis, list) and len(emotion_analysis) > 0:
+                        emotion_data = emotion_analysis[0]
+                    else:
+                        emotion_data = emotion_analysis
+                    
+                    return {
+                        'emotion': emotion_data.get('dominant_emotion', 'neutral'),
+                        'confidence': max(emotion_data.get('emotion', {}).values()) if emotion_data.get('emotion') else 0.5,
+                        'all_scores': emotion_data.get('emotion', {})
+                    }
+                except Exception as deepface_error:
+                    print(f"DeepFace emotion analysis failed: {deepface_error}")
+                    # Fall back to simplified method
             
+            # Simplified emotion detection based on facial features
             # For demo purposes, return random emotion with confidence
             emotion_scores = self.analyze_facial_features(gray)
             
@@ -1090,6 +1114,747 @@ class FaceQualityAssessment:
             print(f"Error drawing quality indicator: {e}")
             return frame
 
+
+class FaceTracker:
+    """Track faces across video frames"""
+    
+    def __init__(self, max_disappeared=10):
+        self.next_object_id = 0
+        self.objects = {}
+        self.disappeared = {}
+        self.max_disappeared = max_disappeared
+        
+    def register(self, face_encoding, face_location, metadata=None):
+        """Register a new face for tracking"""
+        self.objects[self.next_object_id] = {
+            'encoding': face_encoding,
+            'location': face_location,
+            'metadata': metadata or {},
+            'first_seen': time.time(),
+            'last_seen': time.time(),
+            'frame_count': 1
+        }
+        self.disappeared[self.next_object_id] = 0
+        self.next_object_id += 1
+        
+    def deregister(self, object_id):
+        """Remove a face from tracking"""
+        del self.objects[object_id]
+        del self.disappeared[object_id]
+        
+    def update(self, face_encodings, face_locations):
+        """Update tracker with new frame data"""
+        if len(face_encodings) == 0:
+            # Mark all objects as disappeared
+            for object_id in list(self.disappeared.keys()):
+                self.disappeared[object_id] += 1
+                if self.disappeared[object_id] > self.max_disappeared:
+                    self.deregister(object_id)
+            return self.objects
+            
+        # Initialize new set of tracked objects
+        current_objects = set(self.disappeared.keys())
+        
+        # Try to match faces with existing tracked objects
+        for encoding, location in zip(face_encodings, face_locations):
+            matched = False
+            
+            for object_id in current_objects:
+                if self._compare_faces(encoding, self.objects[object_id]['encoding']):
+                    # Update existing object
+                    self.objects[object_id]['location'] = location
+                    self.objects[object_id]['last_seen'] = time.time()
+                    self.objects[object_id]['frame_count'] += 1
+                    self.disappeared[object_id] = 0
+                    matched = True
+                    current_objects.remove(object_id)
+                    break
+            
+            if not matched:
+                # Register new object
+                self.register(encoding, location)
+        
+        # Mark unmatched objects as disappeared
+        for object_id in current_objects:
+            self.disappeared[object_id] += 1
+            if self.disappeared[object_id] > self.max_disappeared:
+                self.deregister(object_id)
+        
+        return self.objects
+    
+    def _compare_faces(self, encoding1, encoding2, threshold=0.6):
+        """Compare two face encodings"""
+        try:
+            if isinstance(encoding1, list) and isinstance(encoding2, list):
+                encoding1 = np.array(encoding1)
+                encoding2 = np.array(encoding2)
+            distance = np.linalg.norm(encoding1 - encoding2)
+            return distance < threshold
+        except:
+            return False
+    
+    def get_tracked_faces(self):
+        """Get all currently tracked faces"""
+        return self.objects
+    
+    def get_face_history(self, object_id):
+        """Get tracking history for a specific face"""
+        return self.objects.get(object_id, {})
+
+class MaskDetector:
+    """Detect face masks using computer vision"""
+    
+    def __init__(self):
+        # In a real implementation, you would load a pre-trained model here
+        # For demonstration, we'll use a simplified approach
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        self.nose_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_mcs_nose.xml')
+        self.mouth_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_mcs_mouth.xml')
+        
+    def detect_mask(self, face_region):
+        """Detect if person is wearing a mask"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            # Detect nose and mouth
+            noses = self.nose_cascade.detectMultiScale(gray, 1.1, 5)
+            mouths = self.mouth_cascade.detectMultiScale(gray, 1.1, 5)
+            
+            # Simple heuristic: if nose and mouth are not visible, likely wearing mask
+            if len(noses) == 0 and len(mouths) == 0:
+                return {
+                    'wearing_mask': True,
+                    'confidence': 0.7,
+                    'reason': 'Nose and mouth not detected'
+                }
+            elif len(noses) > 0 or len(mouths) > 0:
+                return {
+                    'wearing_mask': False,
+                    'confidence': 0.8,
+                    'reason': 'Nose and/or mouth detected'
+                }
+            else:
+                return {
+                    'wearing_mask': False,
+                    'confidence': 0.5,
+                    'reason': 'Uncertain detection'
+                }
+                
+        except Exception as e:
+            print(f"Mask detection error: {e}")
+            return {
+                'wearing_mask': False,
+                'confidence': 0.5,
+                'reason': 'Detection failed'
+            }
+    
+    def analyze_mask_quality(self, face_region):
+        """Analyze mask wearing quality if mask is detected"""
+        try:
+            mask_result = self.detect_mask(face_region)
+            
+            if not mask_result['wearing_mask']:
+                return mask_result
+            
+            # Additional analysis for mask quality
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            height, width = gray.shape
+            
+            # Check if mask covers lower part of face
+            lower_face_region = gray[int(height * 0.5):, :]
+            lower_variance = np.var(lower_face_region)
+            
+            # High variance in lower face suggests improper mask wearing
+            if lower_variance > 1000:
+                quality_score = 0.4
+                quality_reason = 'Mask may not cover nose and mouth properly'
+            else:
+                quality_score = 0.8
+                quality_reason = 'Mask appears to be worn correctly'
+            
+            return {
+                'wearing_mask': True,
+                'confidence': mask_result['confidence'],
+                'quality_score': quality_score,
+                'quality_reason': quality_reason,
+                'reason': mask_result['reason']
+            }
+            
+        except Exception as e:
+            print(f"Mask quality analysis error: {e}")
+            return {
+                'wearing_mask': False,
+                'confidence': 0.5,
+                'reason': 'Analysis failed'
+            }
+
+class HeadPoseEstimator:
+    """Estimate head pose angles (yaw, pitch, roll)"""
+    
+    def __init__(self):
+        # Load facial landmark detector if available
+        try:
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        except:
+            print("Warning: Could not load cascade classifiers")
+    
+    def estimate_pose(self, face_region, face_location=None):
+        """Estimate head pose angles"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            height, width = gray.shape
+            
+            # Detect eyes for pose estimation
+            eyes = self.eye_cascade.detectMultiScale(gray, 1.1, 5)
+            
+            pose_result = {
+                'yaw': 0.0,    # Left/right rotation
+                'pitch': 0.0,  # Up/down rotation
+                'roll': 0.0,   # Head tilt
+                'confidence': 0.5,
+                'looking_at_camera': True
+            }
+            
+            if len(eyes) >= 2:
+                # Calculate eye positions
+                eye_centers = []
+                for (ex, ey, ew, eh) in eyes:
+                    eye_centers.append((ex + ew//2, ey + eh//2))
+                
+                if len(eye_centers) >= 2:
+                    # Sort eyes by x coordinate
+                    eye_centers.sort(key=lambda x: x[0])
+                    left_eye = eye_centers[0]
+                    right_eye = eye_centers[1]
+                    
+                    # Calculate yaw based on eye position asymmetry
+                    eye_center_x = (left_eye[0] + right_eye[0]) / 2
+                    face_center_x = width / 2
+                    yaw_offset = (eye_center_x - face_center_x) / face_center_x
+                    pose_result['yaw'] = yaw_offset * 45  # Convert to degrees
+                    
+                    # Calculate roll based on eye line angle
+                    eye_line_angle = np.arctan2(right_eye[1] - left_eye[1], right_eye[0] - left_eye[0])
+                    pose_result['roll'] = np.degrees(eye_line_angle)
+                    
+                    # Calculate pitch based on eye vertical position
+                    eye_center_y = (left_eye[1] + right_eye[1]) / 2
+                    face_center_y = height / 2
+                    pitch_offset = (eye_center_y - face_center_y) / face_center_y
+                    pose_result['pitch'] = pitch_offset * 30  # Convert to degrees
+                    
+                    # Determine if looking at camera
+                    pose_result['looking_at_camera'] = (
+                        abs(pose_result['yaw']) < 30 and
+                        abs(pose_result['pitch']) < 20 and
+                        abs(pose_result['roll']) < 15
+                    )
+                    
+                    pose_result['confidence'] = 0.8
+            
+            return pose_result
+            
+        except Exception as e:
+            print(f"Head pose estimation error: {e}")
+            return {
+                'yaw': 0.0,
+                'pitch': 0.0,
+                'roll': 0.0,
+                'confidence': 0.3,
+                'looking_at_camera': True,
+                'error': str(e)
+            }
+    
+    def get_pose_description(self, pose_result):
+        """Get human-readable pose description"""
+        descriptions = []
+        
+        if not pose_result['looking_at_camera']:
+            descriptions.append("غير متجه للكاميرا")
+        
+        if abs(pose_result['yaw']) > 30:
+            if pose_result['yaw'] > 0:
+                descriptions.append("مائل لليمين")
+            else:
+                descriptions.append("مائل لليسار")
+        
+        if abs(pose_result['pitch']) > 20:
+            if pose_result['pitch'] > 0:
+                descriptions.append("مائل للأسفل")
+            else:
+                descriptions.append("مائل للأعلى")
+        
+        if abs(pose_result['roll']) > 15:
+            if pose_result['roll'] > 0:
+                descriptions.append("مائل باتجاه عقارب الساعة")
+            else:
+                descriptions.append("مائل عكس عقارب الساعة")
+        
+        if not descriptions:
+            descriptions.append("متجه للكاميرا مباشرة")
+        
+        return ", ".join(descriptions)
+
+class EyeTracker:
+    """Track eye movements and detect gaze direction"""
+    
+    def __init__(self):
+        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_eye.xml')
+        self.gaze_history = deque(maxlen=30)
+        self.blink_history = deque(maxlen=10)
+        
+    def track_eyes(self, face_region):
+        """Track eyes in face region"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            eyes = self.eye_cascade.detectMultiScale(gray, 1.1, 5)
+            
+            result = {
+                'eyes_detected': len(eyes),
+                'left_eye': None,
+                'right_eye': None,
+                'gaze_direction': 'forward',
+                'blink_detected': False,
+                'eye_contact': False
+            }
+            
+            if len(eyes) >= 2:
+                # Sort eyes by x coordinate (left to right)
+                eyes_sorted = sorted(eyes, key=lambda x: x[0])
+                result['left_eye'] = eyes_sorted[0]
+                result['right_eye'] = eyes_sorted[1]
+                
+                # Analyze gaze direction (simplified)
+                gaze_result = self._analyze_gaze(eyes_sorted, gray.shape)
+                result.update(gaze_result)
+                
+                # Detect blink
+                blink_result = self._detect_blink(eyes_sorted, gray)
+                result['blink_detected'] = blink_result['blink_detected']
+                
+                # Check eye contact
+                result['eye_contact'] = (
+                    result['gaze_direction'] == 'forward' and
+                    not result['blink_detected']
+                )
+            
+            return result
+            
+        except Exception as e:
+            print(f"Eye tracking error: {e}")
+            return {
+                'eyes_detected': 0,
+                'left_eye': None,
+                'right_eye': None,
+                'gaze_direction': 'unknown',
+                'blink_detected': False,
+                'eye_contact': False,
+                'error': str(e)
+            }
+    
+    def _analyze_gaze(self, eyes, face_shape):
+        """Analyze gaze direction from eye positions"""
+        try:
+            left_eye, right_eye = eyes
+            
+            # Calculate eye centers
+            left_center = (left_eye[0] + left_eye[2]//2, left_eye[1] + left_eye[3]//2)
+            right_center = (right_eye[0] + right_eye[2]//2, right_eye[1] + right_eye[3]//2)
+            
+            # Calculate gaze based on eye position relative to face center
+            face_center_x = face_shape[1] // 2
+            eye_center_x = (left_center[0] + right_center[0]) // 2
+            
+            horizontal_offset = (eye_center_x - face_center_x) / face_center_x
+            
+            if abs(horizontal_offset) < 0.1:
+                gaze_direction = 'forward'
+            elif horizontal_offset > 0.1:
+                gaze_direction = 'right'
+            else:
+                gaze_direction = 'left'
+            
+            # Store in history
+            self.gaze_history.append(gaze_direction)
+            
+            # Get most common gaze direction from history
+            if len(self.gaze_history) >= 5:
+                gaze_counts = {}
+                for direction in self.gaze_history:
+                    gaze_counts[direction] = gaze_counts.get(direction, 0) + 1
+                stable_gaze = max(gaze_counts, key=gaze_counts.get)
+            else:
+                stable_gaze = gaze_direction
+            
+            return {
+                'gaze_direction': gaze_direction,
+                'stable_gaze': stable_gaze,
+                'horizontal_offset': horizontal_offset
+            }
+            
+        except Exception as e:
+            print(f"Gaze analysis error: {e}")
+            return {
+                'gaze_direction': 'unknown',
+                'stable_gaze': 'unknown',
+                'horizontal_offset': 0.0
+            }
+    
+    def _detect_blink(self, eyes, gray_face):
+        """Detect eye blink"""
+        try:
+            current_time = time.time()
+            
+            # Simple blink detection based on eye aspect ratio
+            left_eye, right_eye = eyes
+            
+            # Calculate eye aspect ratio (simplified)
+            left_aspect = left_eye[2] / max(left_eye[3], 1)
+            right_aspect = right_eye[2] / max(right_eye[3], 1)
+            avg_aspect = (left_aspect + right_aspect) / 2
+            
+            # Blink detected if aspect ratio is very low (eyes closed)
+            blink_detected = avg_aspect < 1.0
+            
+            if blink_detected:
+                self.blink_history.append(current_time)
+            
+            # Check if we had a recent blink
+            recent_blinks = [t for t in self.blink_history if current_time - t < 2]
+            
+            return {
+                'blink_detected': blink_detected,
+                'recent_blinks': len(recent_blinks),
+                'aspect_ratio': avg_aspect
+            }
+            
+        except Exception as e:
+            print(f"Blink detection error: {e}")
+            return {
+                'blink_detected': False,
+                'recent_blinks': 0,
+                'aspect_ratio': 2.0
+            }
+    
+    def get_attention_score(self):
+        """Calculate attention score based on eye tracking"""
+        try:
+            if len(self.gaze_history) < 10:
+                return 0.5
+            
+            # Calculate gaze stability
+            gaze_directions = list(self.gaze_history)
+            forward_count = gaze_directions.count('forward')
+            gaze_stability = forward_count / len(gaze_directions)
+            
+            # Calculate blink rate
+            current_time = time.time()
+            recent_blinks = [t for t in self.blink_history if current_time - t < 10]
+            blink_rate = len(recent_blinks) / 10  # Blinks per second
+            
+            # Normal blink rate is 15-20 per minute
+            normal_blink_rate = 0.25  # ~15 blinks per minute
+            blink_score = 1.0 - min(abs(blink_rate - normal_blink_rate) / normal_blink_rate, 1.0)
+            
+            # Combined attention score
+            attention_score = (gaze_stability * 0.7) + (blink_score * 0.3)
+            
+            return max(0.0, min(1.0, attention_score))
+            
+        except Exception as e:
+            print(f"Attention score calculation error: {e}")
+            return 0.5
+
+class FaceQualityAssessor:
+    """Enhanced face quality assessment with more sophisticated analysis"""
+    
+    def __init__(self):
+        # Quality thresholds
+        self.MIN_LIGHTNESS = 40
+        self.MAX_LIGHTNESS = 220
+        self.MIN_SHARPNESS = 100
+        self.MIN_FACE_SIZE = 80
+        self.MAX_YAW_ANGLE = 30
+        self.MAX_PITCH_ANGLE = 20
+        
+        # Quality weights
+        self.WEIGHT_LIGHTING = 0.25
+        self.WEIGHT_SHARPNESS = 0.35
+        self.WEIGHT_ANGLE = 0.25
+        self.WEIGHT_SIZE = 0.15
+        
+        # Initialize component assessors
+        self.pose_estimator = HeadPoseEstimator()
+        self.eye_tracker = EyeTracker()
+        
+    def assess_face_quality(self, face_region, frame=None, face_location=None):
+        """Comprehensive face quality assessment"""
+        try:
+            results = {
+                'is_acceptable': True,
+                'overall_score': 0.0,
+                'component_scores': {
+                    'lighting': 0.0,
+                    'sharpness': 0.0,
+                    'angle': 0.0,
+                    'size': 0.0,
+                    'symmetry': 0.0,
+                    'clarity': 0.0
+                },
+                'issues': [],
+                'recommendations': [],
+                'pose_analysis': None,
+                'eye_analysis': None
+            }
+            
+            # Basic quality assessments
+            lighting_score = self._assess_enhanced_lighting(face_region)
+            results['component_scores']['lighting'] = lighting_score
+            
+            sharpness_score = self._assess_enhanced_sharpness(face_region)
+            results['component_scores']['sharpness'] = sharpness_score
+            
+            size_score = self._assess_face_size(face_region)
+            results['component_scores']['size'] = size_score
+            
+            symmetry_score = self._assess_face_symmetry(face_region)
+            results['component_scores']['symmetry'] = symmetry_score
+            
+            clarity_score = self._assess_clarity(face_region)
+            results['component_scores']['clarity'] = clarity_score
+            
+            # Advanced analyses
+            pose_result = self.pose_estimator.estimate_pose(face_region, face_location)
+            results['pose_analysis'] = pose_result
+            
+            angle_score = self._calculate_angle_score(pose_result)
+            results['component_scores']['angle'] = angle_score
+            
+            eye_result = self.eye_tracker.track_eyes(face_region)
+            results['eye_analysis'] = eye_result
+            
+            # Calculate overall score
+            results['overall_score'] = (
+                lighting_score * self.WEIGHT_LIGHTING +
+                sharpness_score * self.WEIGHT_SHARPNESS +
+                angle_score * self.WEIGHT_ANGLE +
+                size_score * self.WEIGHT_SIZE
+            )
+            
+            # Determine acceptability and generate issues
+            results['is_acceptable'], results['issues'], results['recommendations'] = \
+                self._evaluate_acceptability(results['component_scores'], pose_result, eye_result)
+            
+            return results
+            
+        except Exception as e:
+            print(f"Face quality assessment error: {e}")
+            return {
+                'is_acceptable': True,
+                'overall_score': 0.5,
+                'component_scores': {key: 0.5 for key in ['lighting', 'sharpness', 'angle', 'size', 'symmetry', 'clarity']},
+                'issues': ['Assessment failed'],
+                'recommendations': ['Please try again'],
+                'pose_analysis': None,
+                'eye_analysis': None,
+                'error': str(e)
+            }
+    
+    def _assess_enhanced_lighting(self, face_region):
+        """Enhanced lighting assessment"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            # Multiple lighting metrics
+            mean_brightness = np.mean(gray)
+            brightness_std = np.std(gray)
+            
+            # Histogram analysis
+            hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+            hist_normalized = hist.flatten() / hist.sum()
+            
+            # Dynamic range
+            dynamic_range = np.percentile(gray, 95) - np.percentile(gray, 5)
+            
+            # Calculate lighting score
+            brightness_score = 0.0
+            if self.MIN_LIGHTNESS <= mean_brightness <= self.MAX_LIGHTNESS:
+                brightness_score = 0.8
+            else:
+                distance = min(abs(mean_brightness - self.MIN_LIGHTNESS), abs(mean_brightness - self.MAX_LIGHTNESS))
+                brightness_score = max(0.2, 0.8 - distance / 100)
+            
+            contrast_score = min(brightness_std / 64, 1.0)
+            dynamic_score = min(dynamic_range / 200, 1.0)
+            
+            # Combined lighting score
+            lighting_score = (brightness_score * 0.5 + contrast_score * 0.3 + dynamic_score * 0.2)
+            
+            return min(lighting_score, 1.0)
+            
+        except Exception as e:
+            print(f"Enhanced lighting assessment error: {e}")
+            return 0.5
+    
+    def _assess_enhanced_sharpness(self, face_region):
+        """Enhanced sharpness assessment"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            # Multiple sharpness metrics
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+            laplacian_var = laplacian.var()
+            
+            # Gradient magnitude
+            sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+            sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+            gradient_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+            gradient_mean = np.mean(gradient_magnitude)
+            
+            # Edge density
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges > 0) / edges.size
+            
+            # Normalize and combine
+            laplacian_score = min(laplacian_var / 500, 1.0)
+            gradient_score = min(gradient_mean / 50, 1.0)
+            edge_score = min(edge_density * 10, 1.0)
+            
+            sharpness_score = (laplacian_score * 0.4 + gradient_score * 0.4 + edge_score * 0.2)
+            
+            return min(sharpness_score, 1.0)
+            
+        except Exception as e:
+            print(f"Enhanced sharpness assessment error: {e}")
+            return 0.5
+    
+    def _assess_face_symmetry(self, face_region):
+        """Assess facial symmetry"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            height, width = gray.shape
+            
+            # Left-right symmetry
+            left_half = gray[:, :width//2]
+            right_half = cv2.flip(gray[:, width//2:], 1)
+            
+            min_width = min(left_half.shape[1], right_half.shape[1])
+            left_half = left_half[:, :min_width]
+            right_half = right_half[:, :min_width]
+            
+            symmetry_score = 1 - np.mean(np.abs(left_half.astype(float) - right_half.astype(float))) / 255
+            
+            return max(0.0, min(1.0, symmetry_score))
+            
+        except Exception as e:
+            print(f"Symmetry assessment error: {e}")
+            return 0.5
+    
+    def _assess_clarity(self, face_region):
+        """Assess overall image clarity"""
+        try:
+            gray = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+            
+            # Local contrast
+            kernel = np.ones((5, 5), np.float32) / 25
+            local_mean = cv2.filter2D(gray, -1, kernel)
+            local_contrast = np.std(gray - local_mean)
+            
+            # Noise estimation
+            noise = cv2.fastNlMeansDenoising(gray, None, h=10)
+            noise_level = np.mean(np.abs(gray.astype(float) - noise.astype(float)))
+            
+            # Combine metrics
+            contrast_score = min(local_contrast / 30, 1.0)
+            noise_score = max(0.0, 1.0 - noise_level / 50)
+            
+            clarity_score = (contrast_score * 0.6 + noise_score * 0.4)
+            
+            return max(0.0, min(1.0, clarity_score))
+            
+        except Exception as e:
+            print(f"Clarity assessment error: {e}")
+            return 0.5
+    
+    def _assess_face_size(self, face_region):
+        """Assess face size"""
+        try:
+            height, width = face_region.shape[:2]
+            face_size = min(height, width)
+            
+            if face_size >= self.MIN_FACE_SIZE:
+                return min(face_size / 200, 1.0)
+            else:
+                return face_size / self.MIN_FACE_SIZE
+                
+        except Exception as e:
+            print(f"Face size assessment error: {e}")
+            return 0.5
+    
+    def _calculate_angle_score(self, pose_result):
+        """Calculate angle score from pose analysis"""
+        try:
+            yaw_abs = abs(pose_result.get('yaw', 0))
+            pitch_abs = abs(pose_result.get('pitch', 0))
+            roll_abs = abs(pose_result.get('roll', 0))
+            
+            # Penalize extreme angles
+            yaw_score = max(0.0, 1.0 - yaw_abs / 45)
+            pitch_score = max(0.0, 1.0 - pitch_abs / 30)
+            roll_score = max(0.0, 1.0 - roll_abs / 20)
+            
+            angle_score = (yaw_score * 0.4 + pitch_score * 0.4 + roll_score * 0.2)
+            
+            return angle_score
+            
+        except Exception as e:
+            print(f"Angle score calculation error: {e}")
+            return 0.5
+    
+    def _evaluate_acceptability(self, component_scores, pose_result, eye_result):
+        """Evaluate overall acceptability and generate recommendations"""
+        issues = []
+        recommendations = []
+        is_acceptable = True
+        
+        # Check each component
+        if component_scores['lighting'] < 0.4:
+            is_acceptable = False
+            issues.append("إضاءة غير مناسبة")
+            recommendations.append("تحسين الإضاءة")
+        
+        if component_scores['sharpness'] < 0.4:
+            is_acceptable = False
+            issues.append("صورة غير واضحة")
+            recommendations.append("تثبيت الكاميرا وعدم الحركة")
+        
+        if component_scores['size'] < 0.3:
+            is_acceptable = False
+            issues.append("الوجه صغير جداً")
+            recommendations.append("الاقتراب من الكاميرا")
+        
+        if component_scores['angle'] < 0.4:
+            is_acceptable = False
+            issues.append("الوجه مائل")
+            recommendations.append("مواجهة الكاميرا مباشرة")
+        
+        # Check pose
+        if pose_result and not pose_result.get('looking_at_camera', True):
+            if is_acceptable:  # Only add if not already unacceptable
+                issues.append("غير متجه للكاميرا")
+                recommendations.append("النظر للكاميرا مباشرة")
+        
+        # Check eyes
+        if eye_result and eye_result.get('eyes_detected', 0) < 2:
+            if is_acceptable:
+                issues.append("لا يمكن رؤية العينين")
+                recommendations.append("ضمان وضوح العينين")
+        
+        return is_acceptable, issues, recommendations
+
+# Create aliases for backward compatibility
+FaceQualityAssessment = FaceQualityAssessor
 
 class FaceClustering:
     """
