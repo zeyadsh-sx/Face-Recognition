@@ -429,7 +429,7 @@ class SimpleMySQLAttendanceGUI:
             
             # Close button
             close_btn = ttk.Button(attendance_window, text="Close", 
-                                 command=attendance_window.destroy)
+                                command=attendance_window.destroy)
             close_btn.pack(pady=10)
             
         except Exception as e:
