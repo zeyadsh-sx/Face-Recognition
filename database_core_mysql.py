@@ -270,15 +270,37 @@ class MySQLAttendanceDatabase:
             print(f"Error ensuring lecture attendance schema: {e}")
 
     def _ensure_attendance_schema(self, cursor):
-        """Ensure attendance table has camera tracking columns"""
+        """Ensure attendance table has required columns"""
         try:
-            cursor.execute("SHOW COLUMNS FROM attendance LIKE 'camera_id'")
-            if not cursor.fetchone():
-                cursor.execute("ALTER TABLE attendance ADD COLUMN camera_id INT DEFAULT NULL AFTER is_real_face")
-            cursor.execute("SHOW COLUMNS FROM attendance LIKE 'camera_id'")
-            if cursor.fetchone():
-                cursor.execute("ALTER TABLE attendance ADD INDEX idx_camera_id (camera_id)")
-        except Error as e:
+            # Check if column exists before adding
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.columns 
+                WHERE table_name = 'attendance' 
+                AND column_name = 'camera_id'
+            """)
+            column_exists = cursor.fetchone()[0] > 0
+            
+            if not column_exists:
+                cursor.execute("ALTER TABLE attendance ADD COLUMN camera_id INT")
+                print("Added camera_id column to attendance table")
+            
+            # Check if index exists before creating
+            cursor.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.statistics 
+                WHERE table_name = 'attendance' 
+                AND index_name = 'idx_camera_id'
+            """)
+            index_exists = cursor.fetchone()[0] > 0
+            
+            if not index_exists:
+                cursor.execute("CREATE INDEX idx_camera_id ON attendance(camera_id)")
+                print("Created idx_camera_id index")
+            else:
+                print("idx_camera_id index already exists")
+            
+        except Exception as e:
             print(f"Error ensuring attendance schema: {e}")
 
     def _create_attendance_alerts_table(self, cursor):
