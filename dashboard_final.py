@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 from flask import Flask, Response, jsonify, request, send_file
-=======
-from flask import Flask, Response, jsonify, request
->>>>>>> shahd
 try:
     from flasgger import Swagger
     FLASGGER_AVAILABLE = True
@@ -12,12 +8,9 @@ import json
 from datetime import datetime, date, timedelta
 import os
 from database_core_mysql import MySQLAttendanceDatabase
-<<<<<<< HEAD
 from services.export_service import ExportService
-=======
 import csv
 from io import StringIO
->>>>>>> shahd
 
 app = Flask(__name__, static_folder='frontend', static_url_path='/frontend')
 app.secret_key = 'your-secret-key-here'
@@ -2795,51 +2788,6 @@ def api_attendance_hourly():
     except Exception as e:
         return jsonify({'error': str(e)})
 
-@app.route('/api/search', methods=['GET'])
-def api_search():
-    """
-    Advanced search for students
-    ---
-    tags:
-      - Search & Filter API
-    parameters:
-      - name: query
-        in: query
-        type: string
-        description: Search term (name)
-    responses:
-      200:
-        description: Returns matching students and their attendance records
-    """
-    if not db:
-        return jsonify({'error': 'Database connection failed'})
-    
-    try:
-        query = request.args.get('query', '').strip()
-        
-        if not query or len(query) < 2:
-            return jsonify({'results': [], 'message': 'Please enter at least 2 characters'})
-        
-        students = db.get_all_students()
-        results = []
-        
-        for student in students:
-            if query.lower() in student.get('name', '').lower():
-                student_data = {
-                    'id': student.get('id'),
-                    'name': student.get('name'),
-                    'department': student.get('department', 'N/A'),
-                    'email': student.get('email', 'N/A')
-                }
-                results.append(student_data)
-        
-        return jsonify({
-            'results': results,
-            'count': len(results),
-            'query': query
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)})
 
 @app.route('/api/attendance/filter', methods=['GET'])
 def api_attendance_filter():

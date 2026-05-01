@@ -26,7 +26,6 @@ import csv
 import threading
 import time
 from database_core_mysql import MySQLAttendanceDatabase
-from face_registration_wizard import FaceRegistrationWizard
 from settings_panel import SettingsPanel
 from screenshot_capture import ScreenshotCapture
 
@@ -175,11 +174,6 @@ class BasicMySQLAttendanceGUI:
                                     command=self.register_student_basic)
         register_btn.pack(side=tk.LEFT, padx=5)
         
-        # Register Student with Wizard button
-        wizard_btn = ttk.Button(button_frame, text="🧙 Registration Wizard", 
-                                command=self.open_registration_wizard)
-        wizard_btn.pack(side=tk.LEFT, padx=5)
-        
         # Settings button
         settings_btn = ttk.Button(button_frame, text="⚙️ Settings", 
                                 command=self.open_settings_panel)
@@ -280,16 +274,6 @@ class BasicMySQLAttendanceGUI:
                 
         except Exception as e:
             messagebox.showerror("Database Error", f"Database test failed: {e}")
-    
-    def open_registration_wizard(self):
-        """Open the face registration wizard"""
-        try:
-            wizard = FaceRegistrationWizard(db=self.db)
-            wizard.run()
-            # Reload faces after wizard completes
-            self.load_known_faces()
-        except Exception as e:
-            messagebox.showerror("Wizard Error", f"Failed to open registration wizard: {e}")
     
     def open_settings_panel(self):
         """Open the settings panel"""
