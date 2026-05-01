@@ -17,6 +17,20 @@ except ImportError:
     cv2 = None
     CV2_AVAILABLE = False
 
+# Try to import face_recognition, if not available use OpenCV's LBP recognizer
+try:
+    import face_recognition
+    FACE_RECOGNITION_AVAILABLE = True
+except ImportError:
+    FACE_RECOGNITION_AVAILABLE = False
+    # Use OpenCV's LBP face recognizer as fallback
+    try:
+        if CV2_AVAILABLE:
+            face_recognition = None
+            # Will use cv2.face.LBPHFaceRecognizer instead
+    except:
+        pass
+
 try:
     import numpy as np
     NUMPY_AVAILABLE = True
@@ -36,36 +50,18 @@ import csv
 import threading
 import time
 from database_core_mysql import MySQLAttendanceDatabase
-from services.local_database import SQLiteAttendanceDatabase
-from services.offline_sync import OfflineSyncService
-from services.export_service import ExportService
-from services.backup_service import BackupService
-from features_ai_advanced import (
-    AntiSpoofing,
-    EmotionDetector,
-    UnknownFaceAlert,
-    LectureSystem,
-    AdvancedAttendanceReporter,
-    MultiFaceAttendanceSystem
-)
+from features_ai_advanced import AntiSpoofing, EmotionDetector, UnknownFaceAlert, LectureSystem, AdvancedAttendanceReporter, FaceQualityAssessment, FaceClustering
 
 class SimpleMySQLAttendanceGUI:
     def __init__(self, db_config=None):
-        self.mysql_config = db_config or {
-            'host': 'localhost',
-            'user': 'root',
-            'password': '',
-            'database': 'attendance_system',
-            'port': 3306
-        }
-        self.offline_mode = False
-        self.local_db = None
-        self.sync_service = None
-        self.last_unknown_alert_time = None
-
-        self.db = self._connect_database(self.mysql_config)
+        # Database connection
+        if db_config:
+            self.db = MySQLAttendanceDatabase(**db_config)
+        else:
+            self.db = self.setup_database_connection()
+        
         if not self.db:
-            messagebox.showerror("Database Error", "Could not connect to MySQL database or initialize offline storage")
+            messagebox.showerror("Database Error", "Could not connect to MySQL database")
             return
         
         # Initialize variables
@@ -75,23 +71,26 @@ class SimpleMySQLAttendanceGUI:
         self.known_face_names = []
         self.today_attendance = {}
         self.registered_image_tk = None
-        self.cameras = []
-        self.selected_camera_id = None
-        self.selected_camera_source = None
-
+        
         # Advanced features
         self.anti_spoofing = AntiSpoofing()
         self.emotion_detector = EmotionDetector()
-        self.unknown_face_alert = UnknownFaceAlert(alert_callback=self.on_unknown_face_detected)
+        self.unknown_face_alert = UnknownFaceAlert(self.db)
         self.lecture_system = None  # Disable lecture system for simplicity
         self.advanced_reporter = AdvancedAttendanceReporter(self.db)
-        self.multi_face_system = MultiFaceAttendanceSystem(self.db, lecture_id='default_lecture', tolerance=0.55, exit_timeout=8)
-        self.export_service = ExportService()
-        self.backup_service = BackupService()
-        self.offline_db_file = "offline_attendance.db"
-        self.backup_schedule_hours = 24
-        self.export_dir = "exports"
-        self.backup_service.start_auto_backup(self.offline_db_file, interval_hours=self.backup_schedule_hours)
+        self.face_quality = FaceQualityAssessment()  # Face Quality Assessment
+        self.face_clustering = FaceClustering()  # Face Clustering
+        
+        # OpenCV face recognizer (fallback when face_recognition not available)
+        self.face_recognizer = None
+        self.face_label_map = {}  # Maps label ID to student name
+        if not FACE_RECOGNITION_AVAILABLE and CV2_AVAILABLE:
+            try:
+                import cv2.face
+                self.face_recognizer = cv2.face.LBPHFaceRecognizer_create()
+                print("OpenCV face recognizer initialized (fallback mode)")
+            except Exception as e:
+                print(f"Could not initialize OpenCV face recognizer: {e}")
         
         # Directories
         self.known_faces_dir = "known_faces"
@@ -102,7 +101,6 @@ class SimpleMySQLAttendanceGUI:
         os.makedirs(self.known_faces_dir, exist_ok=True)
         os.makedirs(self.attendance_images_dir, exist_ok=True)
         os.makedirs(self.unknown_faces_dir, exist_ok=True)
-        os.makedirs(self.export_dir, exist_ok=True)
         
         # Setup GUI
         self.setup_simple_gui()
@@ -113,61 +111,20 @@ class SimpleMySQLAttendanceGUI:
     
     def setup_database_connection(self):
         """Setup MySQL database connection with default XAMPP settings"""
-        return self._connect_database(self.mysql_config)
-
-    def _connect_database(self, config):
         try:
-            db = MySQLAttendanceDatabase(**config)
+            self.db = MySQLAttendanceDatabase(
+                host='localhost',
+                user='root',
+                password='',
+                database='attendance_system',
+                port=3306
+            )
             print("MySQL connection successful!")
-            return db
+            return self.db
         except Exception as e:
-            print(f"MySQL connection failed, switching to offline SQLite: {e}")
-            self._set_offline_mode(reason=str(e))
-            return self.local_db
-
-    def _set_offline_mode(self, reason: str = None):
-        if self.offline_mode and self.local_db:
-            return
-        self.offline_mode = True
-        self.local_db = self.local_db or SQLiteAttendanceDatabase()
-        self.db = self.local_db
-        self.sync_service = self.sync_service or OfflineSyncService(self.local_db, self.mysql_config)
-        self._start_sync_loop()
-        self._update_status_label("Offline mode active. Data is stored locally until connection is restored.")
-        if reason:
-            print(f"Offline mode enabled: {reason}")
-
-    def _start_sync_loop(self):
-        if not self.sync_service:
-            return
-        sync_thread = threading.Thread(target=self._sync_loop, daemon=True)
-        sync_thread.start()
-
-    def _sync_loop(self):
-        while self.offline_mode:
-            result = self.sync_service.sync()
-            status = "Offline mode active. Waiting for connection..."
-            if result.get('status') == 'success' and result.get('synced', 0) > 0:
-                status = f"Offline data synced: {result['synced']} records."
-                if result.get('pending', 0) == 0:
-                    try:
-                        self.db = MySQLAttendanceDatabase(**self.mysql_config)
-                        self.offline_mode = False
-                        status = "Online sync restored."
-                    except Exception as e:
-                        status = f"Sync completed, but MySQL reconnect failed: {e}"
-            elif result.get('status') == 'partial':
-                status = f"Partial sync: {result.get('synced', 0)} synced, {result.get('pending', 0)} pending."
-            self._update_status_label(status)
-            time.sleep(30)
-
-    def _update_status_label(self, text: str):
-        if hasattr(self, 'status_label'):
-            try:
-                self.root.after(0, lambda: self.status_label.config(text=text))
-            except Exception:
-                pass
-
+            print(f"Connection failed: {e}")
+            return None
+    
     def setup_simple_gui(self):
         """Setup simple GUI without complex geometry"""
         try:
@@ -206,51 +163,21 @@ class SimpleMySQLAttendanceGUI:
         self.register_btn = ttk.Button(button_frame, text="👤 Register Student", 
                                     command=self.register_student_simple)
         self.register_btn.pack(side=tk.LEFT, padx=5)
-
-        # Camera selector and add button
-        camera_frame = ttk.Frame(main_frame)
-        camera_frame.pack(pady=10, fill=tk.X)
-
-        ttk.Label(camera_frame, text="Select Camera:").pack(side=tk.LEFT, padx=(0, 5))
-        self.camera_selector = ttk.Combobox(camera_frame, state='readonly', width=40)
-        self.camera_selector.pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
-        self.camera_selector.bind("<<ComboboxSelected>>", self.on_camera_selected)
-
-        self.add_camera_btn = ttk.Button(camera_frame, text="➕ Add Camera", command=self.add_camera_dialog)
-        self.add_camera_btn.pack(side=tk.LEFT, padx=5)
         
         if not FACE_RECOGNITION_AVAILABLE:
             self.register_btn.config(state='normal')  # Allow registration even without face recognition
-
-        self.load_camera_sources()
         
         # View Attendance button
         self.attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
                                       command=self.show_attendance)
         self.attendance_btn.pack(side=tk.LEFT, padx=5)
-
-        # Export report button
-        self.export_btn = ttk.Button(button_frame, text="📤 Export Report",
-                                      command=self.export_report_dialog)
-        self.export_btn.pack(side=tk.LEFT, padx=5)
-
-        # Backup buttons
-        self.backup_btn = ttk.Button(button_frame, text="💾 Backup Now", command=self.backup_now)
-        self.backup_btn.pack(side=tk.LEFT, padx=5)
-        self.restore_btn = ttk.Button(button_frame, text="♻️ Restore Backup", command=self.restore_backup_dialog)
-        self.restore_btn.pack(side=tk.LEFT, padx=5)
-        self.schedule_btn = ttk.Button(button_frame, text="⏰ Backup Schedule", command=self.configure_backup_schedule)
-        self.schedule_btn.pack(side=tk.LEFT, padx=5)
         
-        if self.offline_mode:
-            status_text = "Offline mode active. Data stored locally and will sync when online."
-        elif not FACE_RECOGNITION_AVAILABLE:
-            status_text = "Face recognition unavailable; basic registration enabled."
+        if not FACE_RECOGNITION_AVAILABLE:
+            self.status_label = ttk.Label(main_frame, text="Face recognition unavailable; basic registration enabled.", 
+                                        font=('Arial', 12), foreground='orange')
         else:
-            status_text = "Ready"
-
-        self.status_label = ttk.Label(main_frame, text=status_text, 
-                                     font=('Arial', 12), foreground='orange' if self.offline_mode else 'black')
+            self.status_label = ttk.Label(main_frame, text="Ready", 
+                                        font=('Arial', 12))
         self.status_label.pack(pady=10)
         
         # Video frame
@@ -268,96 +195,67 @@ class SimpleMySQLAttendanceGUI:
             known_face_encodings = []
             known_face_names = []
             
+            # For OpenCV face recognizer fallback
+            if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None:
+                import cv2
+                training_images = []
+                training_labels = []
+                self.face_label_map = {}
+                label_counter = 0
+            
             for student in students:
                 if student.get('face_encoding') is not None:
                     known_face_encodings.append(student['face_encoding'])
                     known_face_names.append(student['name'])
+                    
+                    # Add to face clustering system
+                    if hasattr(student, 'id') and student.get('face_encoding') is not None:
+                        self.face_clustering.add_face(
+                            face_id=str(student['id']),
+                            face_encoding=student['face_encoding'],
+                            metadata={
+                                'name': student['name'],
+                                'image_path': student.get('image_path', '')
+                            }
+                        )
+                    
+                    # For OpenCV recognizer - load training images
+                    if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None:
+                        image_path = student.get('image_path')
+                        if image_path and os.path.exists(image_path):
+                            try:
+                                img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+                                if img is not None:
+                                    training_images.append(img)
+                                    training_labels.append(label_counter)
+                                    self.face_label_map[label_counter] = student['name']
+                                    label_counter += 1
+                            except Exception as e:
+                                print(f"Error loading image {image_path}: {e}")
+            
+            # Train OpenCV recognizer if we have training data
+            if not FACE_RECOGNITION_AVAILABLE and self.face_recognizer is not None and training_images:
+                try:
+                    self.face_recognizer.train(training_images, np.array(training_labels))
+                    print(f"OpenCV face recognizer trained with {len(training_images)} images")
+                except Exception as e:
+                    print(f"Error training OpenCV recognizer: {e}")
             
             self.known_face_encodings = known_face_encodings
             self.known_face_names = known_face_names
-            self.multi_face_system.load_known_students()
+            
+            # Run clustering analysis
+            if len(known_face_names) > 1:
+                duplicate_groups = self.face_clustering.detect_duplicate_groups()
+                if duplicate_groups:
+                    print(f"⚠️ Found {len(duplicate_groups)} potential duplicate groups")
+            
             print(f"Loaded {len(known_face_names)} known faces from database")
             
         except Exception as e:
             print(f"Error loading known faces: {e}")
             self.known_face_encodings = []
             self.known_face_names = []
-
-    def on_unknown_face_detected(self, unknown_face_info):
-        """Handle realtime notification for unknown face detection"""
-        try:
-            if hasattr(self.db, 'add_unknown_face'):
-                self.db.add_unknown_face(unknown_face_info['image_path'])
-            if hasattr(self.db, 'create_alert'):
-                self.db.create_alert('unknown_face', f"Unknown face detected at {unknown_face_info['timestamp']}")
-        except Exception as e:
-            print(f"Failed to persist unknown face alert: {e}")
-
-        def notify():
-            self.status_label.config(text="Unknown face detected! Saved for review.")
-            messagebox.showwarning(
-                "Unknown Face Detected",
-                "A face was detected that does not match any registered student. The image has been saved for review."
-            )
-
-        if hasattr(self, 'root'):
-            try:
-                self.root.after(0, notify)
-            except Exception:
-                notify()
-
-    def load_camera_sources(self):
-        """Load available cameras for selection"""
-        try:
-            self.cameras = self.db.get_all_cameras() if self.db else []
-            camera_names = [f"{cam['id']}: {cam['name']} ({cam['source']})" for cam in self.cameras]
-            self.camera_selector['values'] = camera_names
-            if camera_names:
-                self.camera_selector.current(0)
-                self.on_camera_selected()
-        except Exception as e:
-            print(f"Error loading camera sources: {e}")
-
-    def on_camera_selected(self, event=None):
-        try:
-            selection = self.camera_selector.get()
-            if not selection:
-                self.selected_camera_id = None
-                self.selected_camera_source = None
-                return
-
-            camera_id = int(selection.split(':', 1)[0])
-            camera = next((c for c in self.cameras if c['id'] == camera_id), None)
-            if camera:
-                self.selected_camera_id = camera['id']
-                self.selected_camera_source = camera['source']
-        except Exception as e:
-            print(f"Error selecting camera: {e}")
-            self.selected_camera_id = None
-            self.selected_camera_source = None
-
-    def add_camera_dialog(self):
-        """Add a new camera source to the system"""
-        try:
-            name = simpledialog.askstring("Add Camera", "Enter camera name:")
-            if not name:
-                return
-
-            source = simpledialog.askstring("Add Camera", "Enter camera source (0 for default webcam, RTSP/HTTP URL or device path):")
-            if not source:
-                return
-
-            location = simpledialog.askstring("Add Camera", "Enter camera location (optional):")
-            ip_address = simpledialog.askstring("Add Camera", "Enter camera IP address (optional):")
-
-            camera_id = self.db.add_camera(name, source, location, ip_address)
-            if camera_id:
-                messagebox.showinfo("Success", f"Camera '{name}' added successfully.")
-                self.load_camera_sources()
-            else:
-                messagebox.showerror("Error", "Failed to add camera.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Unable to add camera: {e}")
 
     def load_attendance_data(self):
         """Load today's attendance from database"""
@@ -386,15 +284,9 @@ class SimpleMySQLAttendanceGUI:
             return
 
         try:
-            source = self.selected_camera_source if self.selected_camera_source else '0'
-            try:
-                source_index = int(source)
-            except ValueError:
-                source_index = source
-
-            self.video_capture = cv2.VideoCapture(source_index)
+            self.video_capture = cv2.VideoCapture(0)
             if not self.video_capture.isOpened():
-                raise Exception("Could not open camera source: " + str(source))
+                raise Exception("Could not open camera")
             
             self.camera_running = True
             self.start_btn.config(state='disabled')
@@ -440,37 +332,76 @@ class SimpleMySQLAttendanceGUI:
             # Convert color space
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            if CV2_AVAILABLE:
-                recognized_faces, tracked_faces = self.multi_face_system.process_frame(frame)
-
-                for face in recognized_faces:
-                    if face.get('student_id') is None:
-                        now = datetime.now()
-                        if not self.last_unknown_alert_time or (now - self.last_unknown_alert_time).total_seconds() > 10:
-                            self.last_unknown_alert_time = now
-                            x, y, w, h = face['bounding_box']
-                            face_region = frame[y:y+h, x:x+w]
-                            self.unknown_face_alert.handle_unknown_face(face_region, frame, now)
-                    else:
-                        name = face.get('name', 'Unknown')
-                        first_seen = name not in self.today_attendance
-                        self.today_attendance[name] = {
-                            'time': datetime.now().time().strftime("%H:%M:%S"),
-                            'emotion': face.get('emotion_data', {}).get('emotion', 'neutral'),
-                            'is_real_face': True
-                        }
-                        if first_seen:
-                            self.mark_attendance_simple(name)
-
-                frame = self.multi_face_system.annotate_frame(frame, recognized_faces, tracked_faces)
-            else:
-                face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            if FACE_RECOGNITION_AVAILABLE and NUMPY_AVAILABLE and self.known_face_encodings:
+                # Find faces and encodings
+                face_locations = face_recognition.face_locations(rgb_frame)
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                
+                # Loop through found faces
+                for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+                    # Extract face region for quality assessment
+                    face_region = frame[top:bottom, left:right]
+                    
+                    # Face Quality Assessment - تقييم جودة الصورة
+                    quality_result = self.face_quality.assess_quality(face_region, frame, (top, right, bottom, left))
+                    
+                    # Draw quality indicator on frame
+                    frame = self.face_quality.draw_quality_indicator(frame, (top, right, bottom, left), quality_result)
+                    
+                    # Only proceed if quality is acceptable
+                    if not quality_result['is_acceptable']:
+                        # Show warning message
+                        quality_msg = self.face_quality.get_quality_message(quality_result)
+                        cv2.putText(frame, quality_msg[:50], (10, 30), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                        continue  # Skip this face - quality not acceptable
+                    
+                    # Compare with known faces
+                    matches = face_recognition.compare_faces(self.known_face_encodings, face_encoding, tolerance=0.6)
+                    name = "Unknown"
+                    
+                    if True in matches:
+                        first_match_index = matches.index(True)
+                        name = self.known_face_names[first_match_index]
+                        
+                        # Mark attendance
+                        self.mark_attendance_simple(name)
+                    
+                    # Draw rectangle and name
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            elif CV2_AVAILABLE:
+                # Fallback - use OpenCV face recognizer if available
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                face_cascade = cv2.CascadeClassifier(cascade_path)
+                if face_cascade.empty():
+                    # Try alternative path
+                    cv2_path = os.path.dirname(cv2.__file__)
+                    cascade_path = os.path.join(cv2_path, 'data', 'haarcascade_frontalface_default.xml')
+                    face_cascade = cv2.CascadeClassifier(cascade_path)
+                
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
                 
                 for (x, y, w, h) in faces:
+                    # Draw rectangle around face
                     cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                    cv2.putText(frame, "Face Detected (No Recognition)", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    
+                    # Try to recognize face using OpenCV recognizer
+                    name = "Unknown"
+                    if self.face_recognizer is not None:
+                        try:
+                            face_roi = gray[y:y+h, x:x+w]
+                            if face_roi.size > 0:
+                                label, confidence = self.face_recognizer.predict(face_roi)
+                                if label in self.face_label_map and confidence < 70:
+                                    name = self.face_label_map[label]
+                                    # Mark attendance
+                                    self.mark_attendance_simple(name)
+                        except Exception as e:
+                            print(f"Face recognition error: {e}")
+                    
+                    cv2.putText(frame, name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             
             # Show frame
             cv2.imshow('Face Recognition', frame)
@@ -496,20 +427,8 @@ class SimpleMySQLAttendanceGUI:
                 date_str=date_str,
                 time_str=time_str,
                 emotion='neutral',
-                is_real_face=True,
-                camera_id=self.selected_camera_id
+                is_real_face=True
             )
-
-            if not success and not self.offline_mode and message.startswith("Database error"):
-                self._set_offline_mode(reason=message)
-                success, message = self.db.mark_attendance_advanced(
-                    student_id=student['id'],
-                    date_str=date_str,
-                    time_str=time_str,
-                    emotion='neutral',
-                    is_real_face=True,
-                    camera_id=self.selected_camera_id
-                )
 
             if success:
                 self.today_attendance[name] = {
@@ -522,8 +441,6 @@ class SimpleMySQLAttendanceGUI:
 
         except Exception as e:
             print(f"Error marking attendance: {e}")
-            if not self.offline_mode:
-                self._set_offline_mode(reason=str(e))
     
     def register_student_simple(self):
         """Simple student registration"""
@@ -549,6 +466,25 @@ class SimpleMySQLAttendanceGUI:
             self.image_label.config(image=self.registered_image_tk, text="")
             self.image_label.image = self.registered_image_tk
 
+            # Face Quality Assessment for registration image
+            if CV2_AVAILABLE:
+                # Load image with OpenCV for quality assessment
+                cv_image = cv2.imread(image_path)
+                if cv_image is not None:
+                    # Get face location if available
+                    if FACE_RECOGNITION_AVAILABLE:
+                        image_rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                        face_locations = face_recognition.face_locations(image_rgb)
+                        if face_locations:
+                            top, right, bottom, left = face_locations[0]
+                            face_region = cv_image[top:bottom, left:right]
+                            quality_result = self.face_quality.assess_quality(face_region, cv_image, face_locations[0])
+                            
+                            if not quality_result['is_acceptable']:
+                                quality_msg = self.face_quality.get_quality_message(quality_result)
+                                messagebox.showwarning("Image Quality Warning", quality_msg)
+                                return  # Reject the image
+
             face_encoding = None
             if FACE_RECOGNITION_AVAILABLE:
                 # Load and process image
@@ -560,136 +496,53 @@ class SimpleMySQLAttendanceGUI:
                     return
                 
                 face_encoding = face_encodings[0]
+                
+                # Face Clustering - Check for duplicates before registration
+                temp_clustering = FaceClustering()
+                temp_clustering.add_face('temp_new', face_encoding, {'name': name, 'image_path': image_path})
+                
+                # Compare with existing faces
+                for existing_id, existing_encoding in self.face_clustering.face_encodings.items():
+                    distance = np.linalg.norm(face_encoding - existing_encoding)
+                    if distance < 0.6:  # Similar face found
+                        existing_name = self.face_clustering.face_metadata.get(existing_id, {}).get('name', 'Unknown')
+                        response = messagebox.askyesno(
+                            "Duplicate Detected",
+                            f"This face is similar to '{existing_name}' already registered.\n\n"
+                            f"Do you want to continue anyway?"
+                        )
+                        if not response:
+                            return
+                        break
+            elif self.face_recognizer is not None:
+                # For OpenCV recognizer, we need grayscale images
+                cv_image = cv2.imread(image_path)
+                if cv_image is not None:
+                    gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+                    # Save grayscale version to known_faces directory
+                    student_image_path = os.path.join(self.known_faces_dir, f"{name}.jpg")
+                    cv2.imwrite(student_image_path, gray)
+                    image_path = student_image_path
+                    messagebox.showinfo("Info", "Student registered with OpenCV face recognizer (fallback mode)")
+                else:
+                    messagebox.showerror("Error", "Could not process image")
+                    return
             else:
-                # Allow registration without face recognition
+                # No face recognition available at all
                 messagebox.showinfo("Info", "Face recognition not available. Registering student without face data.")
             
             # Add to database
             student_id = self.db.add_student(name, face_encoding, image_path)
             
-            if not student_id and not self.offline_mode:
-                self._set_offline_mode(reason="MySQL write failed during registration")
-                student_id = self.db.add_student(name, face_encoding, image_path)
-
             if student_id:
                 messagebox.showinfo("Success", f"Student {name} registered successfully!")
                 self.load_known_faces()
-                self.multi_face_system.load_known_students()
+            else:
+                messagebox.showerror("Error", "Failed to register student")
+                
         except Exception as e:
             messagebox.showerror("Error", f"Registration failed: {e}")
-            if not self.offline_mode:
-                self._set_offline_mode(reason=str(e))
     
-    def export_report_dialog(self):
-        """Export attendance report for a date range."""
-        try:
-            start_date = simpledialog.askstring("Export Report", "Start date (YYYY-MM-DD):", initialvalue=date.today().isoformat())
-            if not start_date:
-                return
-
-            end_date = simpledialog.askstring("Export Report", "End date (YYYY-MM-DD):", initialvalue=date.today().isoformat())
-            if not end_date:
-                return
-
-            format_choice = simpledialog.askstring(
-                "Export Format",
-                "Choose export format (csv, excel, pdf, json):",
-                initialvalue="csv"
-            )
-            if not format_choice:
-                return
-
-            format_choice = format_choice.strip().lower()
-            if format_choice not in ('csv', 'excel', 'pdf', 'json'):
-                messagebox.showerror("Export Error", "Invalid export format selected.")
-                return
-
-            attendance_records = self.db.get_attendance_by_date_range(start_date, end_date)
-            if not attendance_records:
-                messagebox.showinfo("No Records", "No attendance records found for the selected period.")
-                return
-
-            extension = 'csv' if format_choice == 'csv' else 'xlsx' if format_choice == 'excel' else 'pdf' if format_choice == 'pdf' else 'json'
-            filename = os.path.join(self.export_dir, f"attendance_{start_date}_{end_date}.{extension}")
-
-            if format_choice == 'csv':
-                success, result = self.export_service.export_to_csv(attendance_records, filename)
-            elif format_choice == 'excel':
-                success, result = self.export_service.export_to_excel(attendance_records, filename)
-            elif format_choice == 'pdf':
-                success, result = self.export_service.export_to_pdf(attendance_records, filename, title=f"Attendance Report {start_date} to {end_date}")
-            else:
-                success, result = self.export_service.export_to_json(attendance_records, filename)
-
-            if success:
-                messagebox.showinfo("Export Complete", f"Report saved to: {result}")
-            else:
-                messagebox.showerror("Export Failed", f"Could not export report: {result}")
-
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export report: {e}")
-
-    def backup_now(self):
-        try:
-            backup_path = self.offline_db_file
-            success, result = self.backup_service.backup_database_file(backup_path)
-            if success:
-                messagebox.showinfo("Backup Complete", f"Backup saved: {result}")
-            else:
-                messagebox.showerror("Backup Failed", f"Could not create backup: {result}")
-        except Exception as e:
-            messagebox.showerror("Backup Failed", f"Could not create backup: {e}")
-
-    def restore_backup_dialog(self):
-        try:
-            backup_file = filedialog.askopenfilename(
-                title="Select backup to restore",
-                initialdir=self.backup_service.backup_dir,
-                filetypes=[("SQLite Backup Files", "*.db"), ("JSON files", "*.json"), ("All files", "*.*")]
-            )
-            if not backup_file:
-                return
-
-            restore_path = filedialog.asksaveasfilename(
-                title="Restore backup to",
-                initialdir=os.getcwd(),
-                initialfile=os.path.basename(self.offline_db_file),
-                defaultextension=os.path.splitext(backup_file)[1] or ".db",
-                filetypes=[("SQLite Backup Files", "*.db"), ("All files", "*.*")]
-            )
-            if not restore_path:
-                return
-
-            success, result = self.backup_service.restore_backup(backup_file, restore_path)
-            if success:
-                messagebox.showinfo("Restore Complete", f"Backup restored to: {result}\nPlease restart the app if needed.")
-            else:
-                messagebox.showerror("Restore Failed", f"Could not restore backup: {result}")
-        except Exception as e:
-            messagebox.showerror("Restore Failed", f"Could not restore backup: {e}")
-
-    def configure_backup_schedule(self):
-        try:
-            interval_hours = simpledialog.askinteger(
-                "Backup Schedule",
-                "Auto-backup interval (hours):",
-                initialvalue=self.backup_schedule_hours,
-                minvalue=1,
-                maxvalue=168
-            )
-            if interval_hours is None:
-                return
-
-            self.backup_schedule_hours = interval_hours
-            self.backup_service.stop_auto_backup()
-            success, result = self.backup_service.start_auto_backup(self.offline_db_file, interval_hours=self.backup_schedule_hours)
-            if success:
-                messagebox.showinfo("Schedule Updated", result)
-            else:
-                messagebox.showerror("Schedule Error", result)
-        except Exception as e:
-            messagebox.showerror("Schedule Error", f"Could not set backup schedule: {e}")
-
     def show_attendance(self):
         """Show attendance in a simple window"""
         try:
