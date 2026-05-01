@@ -268,10 +268,10 @@ class UnknownFaceAlert:
         """Save unknown face as known student"""
         try:
             # Move image to known faces
-            from database import AttendanceDatabase
-            db = AttendanceDatabase()
+            from database_core_mysql import MySQLAttendanceDatabase
+            db = MySQLAttendanceDatabase()
             
-            student_id = db.add_student(name, face_encoding, unknown_face_info['image_path'])
+            student_id = db.add_student_advanced(name, face_encoding, unknown_face_info['image_path'])
             
             # Remove from unknown faces list
             if unknown_face_info in self.unknown_faces:

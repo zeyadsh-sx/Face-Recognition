@@ -151,12 +151,12 @@ class SimpleMySQLAttendanceGUI:
         
         # Start Camera button
         self.start_btn = ttk.Button(button_frame, text="📹 Start Camera", 
-                                   command=self.start_camera)
+                                command=self.start_camera)
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
         # Stop Camera button
         self.stop_btn = ttk.Button(button_frame, text="⏹️ Stop Camera", 
-                                  command=self.stop_camera, state='disabled')
+                                command=self.stop_camera, state='disabled')
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student button
@@ -169,7 +169,7 @@ class SimpleMySQLAttendanceGUI:
         
         # View Attendance button
         self.attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
-                                      command=self.show_attendance)
+                                command=self.show_attendance)
         self.attendance_btn.pack(side=tk.LEFT, padx=5)
         
         if not FACE_RECOGNITION_AVAILABLE:
@@ -577,7 +577,7 @@ class SimpleMySQLAttendanceGUI:
             
             # Close button
             close_btn = ttk.Button(attendance_window, text="Close", 
-                                 command=attendance_window.destroy)
+                                command=attendance_window.destroy)
             close_btn.pack(pady=10)
             
         except Exception as e:
