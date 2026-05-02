@@ -135,7 +135,7 @@ class SimpleMySQLAttendanceGUI:
         
         # Flip Camera button
         self.flip_btn = ttk.Button(button_frame, text="🔄 Flip Camera", 
-                                  command=self.toggle_flip_camera)
+                                command=self.toggle_flip_camera)
         self.flip_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student button
@@ -148,7 +148,7 @@ class SimpleMySQLAttendanceGUI:
         
         # View Attendance button
         self.attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
-                                      command=self.show_attendance)
+                                    command=self.show_attendance)
         self.attendance_btn.pack(side=tk.LEFT, padx=5)
         
         if not FACE_RECOGNITION_AVAILABLE:
