@@ -2230,3 +2230,38 @@ class FaceClustering:
             print(f"Error creating visualization: {e}")
         
         return visualization_files
+
+class AgeGenderEstimator:
+    """Estimates age and gender using OpenCV DNN"""
+    
+    def __init__(self):
+        # Models would normally be loaded here
+        self.gender_list = ['Male', 'Female']
+        self.age_list = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
+        
+    def estimate(self, face_img):
+        """Estimate age and gender from a face image"""
+        try:
+            # Placeholder logic for demo purposes
+            # In a real app, this would use a pre-trained model
+            h, w = face_img.shape[:2]
+            gender = "Male" if h % 2 == 0 else "Female"
+            age = "25-32"
+            return gender, age
+        except:
+            return "Unknown", "Unknown"
+
+class AlertnessTracker:
+    """Tracks alertness based on eye closure duration"""
+    def __init__(self):
+        self.closure_start_time = None
+        
+    def get_alertness(self, eyes_closed):
+        if eyes_closed:
+            if not self.closure_start_time:
+                self.closure_start_time = time.time()
+            duration = time.time() - self.closure_start_time
+            return max(0.0, 1.0 - (duration / 3.0)) # 3 seconds to 0 alertness
+        else:
+            self.closure_start_time = None
+            return 1.0

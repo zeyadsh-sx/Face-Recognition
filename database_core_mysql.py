@@ -542,13 +542,12 @@ class MySQLAttendanceDatabase:
                 cursor.execute('''
                     INSERT INTO attendance 
                     (student_id, date, time, image_path, emotion, emotion_confidence, 
-                     spoofing_score, is_real_face, camera_id, mask_detected, mask_confidence, mask_violation, lecture_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     spoofing_score, is_real_face)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ''', (
                     student_id, date_str, time_str, image_path,
                     emotion, emotion_confidence,
-                    spoofing_score, is_real_face, camera_id,
-                    mask_detected, mask_confidence, mask_violation, lecture_id
+                    spoofing_score, is_real_face
                 ))
 
                 attendance_id = cursor.lastrowid
@@ -941,11 +940,10 @@ class MySQLAttendanceDatabase:
                 cursor.execute('''
                     INSERT INTO attendance 
                     (student_id, date, time, image_path, emotion, emotion_confidence, 
-                     spoofing_score, is_real_face, mask_detected, mask_confidence, mask_violation, lecture_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     spoofing_score, is_real_face)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ''', (student_id, date_str, time_str, image_path, emotion, 
-                       emotion_confidence, spoofing_score, is_real_face,
-                       mask_detected, mask_confidence, mask_violation, lecture_id))
+                       emotion_confidence, spoofing_score, is_real_face))
                 
                 # Record emotion analytics if available
                 if emotion:
@@ -968,8 +966,8 @@ class MySQLAttendanceDatabase:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute('''
                     SELECT s.name, a.time, a.image_path, a.timestamp, a.emotion, 
-                           a.emotion_confidence, a.spoofing_score, a.is_real_face,
-                           a.camera_id, a.mask_detected, a.mask_confidence, a.mask_violation
+                           a.emotion_confidence, a.spoofing_score, a.is_real_face
+
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id
                     WHERE a.date = %s
@@ -988,8 +986,8 @@ class MySQLAttendanceDatabase:
             with self.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute('''
-                    SELECT s.name, a.date, a.time, a.image_path, a.timestamp, a.emotion,
-                           a.mask_detected, a.mask_confidence, a.mask_violation
+                    SELECT s.name, a.date, a.time, a.image_path, a.timestamp, a.emotion
+
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id
                     WHERE a.date BETWEEN %s AND %s

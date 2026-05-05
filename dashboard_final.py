@@ -8,7 +8,7 @@ import json
 from datetime import datetime, date, timedelta
 import os
 from database_core_mysql import MySQLAttendanceDatabase
-from services.export_service import ExportService
+# from services.export_service import ExportService
 import csv
 from io import StringIO
 
@@ -35,7 +35,7 @@ except Exception as e:
     print(f"❌ MySQL Dashboard connection failed: {e}")
     db = None
 
-export_service = ExportService()
+# export_service = ExportService()
 
 @app.route('/')
 def dashboard():

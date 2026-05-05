@@ -58,6 +58,7 @@ class SimpleMySQLAttendanceGUI:
         self.today_attendance = {}
         self.registered_image_tk = None
         self.flip_camera = False  # Add flip camera flag
+        self.last_saved_time = {}  # Cooldown for saving images
         
         # Advanced features
         self.anti_spoofing = AntiSpoofing()
@@ -215,9 +216,18 @@ class SimpleMySQLAttendanceGUI:
             return
 
         try:
-            self.video_capture = cv2.VideoCapture(0)
+            # Try multiple backends for stability on Windows
+            for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF, None]:
+                if backend is not None:
+                    self.video_capture = cv2.VideoCapture(0, backend)
+                else:
+                    self.video_capture = cv2.VideoCapture(0)
+                
+                if self.video_capture.isOpened():
+                    break
+                    
             if not self.video_capture.isOpened():
-                raise Exception("Could not open camera")
+                raise Exception("Could not open camera with any backend")
             
             self.camera_running = True
             self.start_btn.config(state='disabled')
@@ -274,7 +284,7 @@ class SimpleMySQLAttendanceGUI:
             # Convert color space
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            if FACE_RECOGNITION_AVAILABLE and NUMPY_AVAILABLE and self.known_face_encodings:
+            if FACE_RECOGNITION_AVAILABLE and NUMPY_AVAILABLE:
                 # Find faces and encodings
                 face_locations = face_recognition.face_locations(rgb_frame)
                 face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
@@ -289,12 +299,65 @@ class SimpleMySQLAttendanceGUI:
                         first_match_index = matches.index(True)
                         name = self.known_face_names[first_match_index]
                         
+                        # Detect emotion
+                        face_region = frame[max(0, top-20):min(frame.shape[0], bottom+20), max(0, left-20):min(frame.shape[1], right+20)]
+                        if face_region.size > 0:
+                            emotion_result = self.emotion_detector.detect_emotion(face_region)
+                            emotion = emotion_result.get('emotion', 'neutral')
+                        else:
+                            emotion = 'neutral'
+                            
+                        # Save to known_faces
+                        current_time = time.time()
+                        last_saved = self.last_saved_time.get(name, 0)
+                        if current_time - last_saved > 5:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            filename = f"{name.replace(' ', '_')}_{timestamp}.jpg"
+                            cv2.imwrite(os.path.join(self.known_faces_dir, filename), frame)
+                            self.last_saved_time[name] = current_time
+                        
                         # Mark attendance
-                        self.mark_attendance_simple(name)
-                    
+                        self.mark_attendance_simple(name, emotion)
+                        
+                        # Draw rectangle and name with emotion (ASCII emoji since OpenCV doesn't support unicode emojis)
+                        ascii_emojis = {'happy': ':)', 'sad': ':(', 'angry': '>:(', 'surprise': ':O', 'fear': 'D:', 'disgust': 'x(', 'neutral': ':|'}
+                        emoji = ascii_emojis.get(emotion, '')
+                        display_text = f"{name} {emoji}"
+                        color = (0, 255, 0)
+                    else:
+                        # Auto-register unknown face
+                        # We don't use a strict cooldown here because the face is added to known_encodings immediately
+                        # which prevents it from being registered again in the next frame.
+                        
+                        # Generate a name for the auto-registered student
+                        auto_name = f"Auto_Student_{datetime.now().strftime('%H%M%S')}_{left}"
+                        
+                        # Save image to unknown_faces
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        filename = f"{auto_name}_{timestamp}.jpg"
+                        image_path = os.path.join(self.unknown_faces_dir, filename)
+                        cv2.imwrite(image_path, frame)
+                        
+                        # Add to database
+                        student_id = self.db.add_student(auto_name, face_encoding, image_path)
+                        
+                        if student_id:
+                            # Add to running encodings so they are recognized immediately next frame
+                            self.known_face_encodings.append(face_encoding)
+                            self.known_face_names.append(auto_name)
+                            print(f"Auto-registered passing student as: {auto_name}")
+                            
+                            display_text = auto_name
+                            color = (0, 255, 0)
+                        else:
+                            display_text = "Unknown (DB Error)"
+                            color = (0, 0, 255)
+                            
                     # Draw rectangle and name
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-                    cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+                    (text_width, text_height), _ = cv2.getTextSize(display_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+                    cv2.rectangle(frame, (left, top - 25), (left + text_width, top), color, cv2.FILLED)
+                    cv2.putText(frame, display_text, (left, top - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0) if name != "Unknown" else (255,255,255), 2)
             elif CV2_AVAILABLE:
                 # Fallback - basic face detection when no face encodings available
                 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -312,7 +375,7 @@ class SimpleMySQLAttendanceGUI:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     
-    def mark_attendance_simple(self, name):
+    def mark_attendance_simple(self, name, emotion='neutral'):
         """Mark attendance in database"""
         try:
             student = self.db.get_student_by_name(name)
@@ -328,14 +391,14 @@ class SimpleMySQLAttendanceGUI:
                 student_id=student['id'],
                 date_str=date_str,
                 time_str=time_str,
-                emotion='neutral',
+                emotion=emotion,
                 is_real_face=True
             )
 
             if success:
                 self.today_attendance[name] = {
                     'time': time_str,
-                    'emotion': 'neutral',
+                    'emotion': emotion,
                     'is_real_face': True
                 }
             else:
@@ -345,24 +408,51 @@ class SimpleMySQLAttendanceGUI:
             print(f"Error marking attendance: {e}")
     
     def register_student_simple(self):
-        """Simple student registration"""
+        """Simple student registration from camera"""
         try:
+            if not self.camera_running or self.video_capture is None:
+                messagebox.showerror("Error", "Please start the camera first to capture the student's face.")
+                return
+                
             # Ask for student name
             name = simpledialog.askstring("Register Student", "Enter student name:")
             if not name:
                 return
             
-            # Ask for image file
-            image_path = filedialog.askopenfilename(
-                title="Select student image",
-                filetypes=[("Image files", "*.jpg *.jpeg *.png")]
-            )
-            
-            if not image_path:
+            # Capture frame from running camera
+            ret, frame = self.video_capture.read()
+            if not ret:
+                messagebox.showerror("Error", "Failed to capture image from camera.")
                 return
+                
+            if self.flip_camera:
+                frame = cv2.flip(frame, 1)
+            # Check if student exists in attendance_images
+            exists_in_attendance = False
+            try:
+                for f in os.listdir(self.attendance_images_dir):
+                    if name.replace(' ', '_').lower() in f.lower():
+                        exists_in_attendance = True
+                        break
+            except Exception:
+                pass
+                
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"{name.replace(' ', '_')}_{timestamp}.jpg"
+
+            if exists_in_attendance:
+                messagebox.showinfo("معلومة النظام", f"الطالب '{name}' موجود بالفعل في سجلات (attendance_images). سيتم الحفظ في (known_faces).")
+                image_path = os.path.join(self.known_faces_dir, filename)
+            else:
+                messagebox.showinfo("معلومة النظام", f"الطالب '{name}' غير موجود. سيتم تسجيله كطالب جديد وحفظه في (unknown_faces).")
+                image_path = os.path.join(self.unknown_faces_dir, filename)
             
-            # Show selected image preview even if face recognition is not available
-            pil_image = Image.open(image_path)
+            # Save the image to the determined path
+            cv2.imwrite(image_path, frame)
+            
+            # Process for UI preview
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
             pil_image = pil_image.resize((320, 240), Image.LANCZOS)
             self.registered_image_tk = ImageTk.PhotoImage(pil_image)
             self.image_label.config(image=self.registered_image_tk, text="")
@@ -370,14 +460,18 @@ class SimpleMySQLAttendanceGUI:
 
             face_encoding = None
             if FACE_RECOGNITION_AVAILABLE:
-                # Load and process image
-                image = face_recognition.load_image_file(image_path)
-                face_encodings = face_recognition.face_encodings(image)
+                # Extract face encoding directly from the captured frame
+                face_locations = face_recognition.face_locations(rgb_frame)
                 
-                if not face_encodings:
-                    messagebox.showerror("Error", "No face found in image")
+                if not face_locations:
+                    messagebox.showerror("Error", "No face found in camera view. Please try again.")
+                    try:
+                        os.remove(image_path)
+                    except:
+                        pass
                     return
                 
+                face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
                 face_encoding = face_encodings[0]
             else:
                 # Allow registration without face recognition
