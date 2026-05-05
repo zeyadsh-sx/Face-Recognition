@@ -124,31 +124,31 @@ class SimpleMySQLAttendanceGUI:
         button_frame.pack(pady=20)
         
         # Start Camera button
-        self.start_btn = ttk.Button(button_frame, text="📹 Start Camera", 
-                                   command=self.start_camera)
+        self.start_btn = ttk.Button(button_frame, text="Start Camera", 
+                                    command=self.start_camera)
         self.start_btn.pack(side=tk.LEFT, padx=5)
         
         # Stop Camera button
-        self.stop_btn = ttk.Button(button_frame, text="⏹️ Stop Camera", 
-                                  command=self.stop_camera, state='disabled')
+        self.stop_btn = ttk.Button(button_frame, text="Stop Camera", 
+                                   command=self.stop_camera, state='disabled')
         self.stop_btn.pack(side=tk.LEFT, padx=5)
         
         # Flip Camera button
-        self.flip_btn = ttk.Button(button_frame, text="🔄 Flip Camera", 
-                                command=self.toggle_flip_camera)
+        self.flip_btn = ttk.Button(button_frame, text="Flip Camera", 
+                                 command=self.toggle_flip_camera)
         self.flip_btn.pack(side=tk.LEFT, padx=5)
         
         # Register Student button
-        self.register_btn = ttk.Button(button_frame, text="👤 Register Student", 
-                                    command=self.register_student_simple)
+        self.register_btn = ttk.Button(button_frame, text="Register Student", 
+                                     command=self.register_student_simple)
         self.register_btn.pack(side=tk.LEFT, padx=5)
         
         if not FACE_RECOGNITION_AVAILABLE:
             self.register_btn.config(state='normal')  # Allow registration even without face recognition
         
         # View Attendance button
-        self.attendance_btn = ttk.Button(button_frame, text="📊 View Attendance", 
-                                    command=self.show_attendance)
+        self.attendance_btn = ttk.Button(button_frame, text="View Attendance", 
+                                     command=self.show_attendance)
         self.attendance_btn.pack(side=tk.LEFT, padx=5)
         
         if not FACE_RECOGNITION_AVAILABLE:
@@ -419,10 +419,10 @@ class SimpleMySQLAttendanceGUI:
             
             if self.today_attendance:
                 for name, info in self.today_attendance.items():
-                    text_widget.insert(tk.END, f"👤 {name}\n")
-                    text_widget.insert(tk.END, f"   🕐 Time: {info['time']}\n")
-                    text_widget.insert(tk.END, f"   😊 Emotion: {info['emotion']}\n")
-                    text_widget.insert(tk.END, f"   ✅ Real Face: {info['is_real_face']}\n")
+                    text_widget.insert(tk.END, f"- {name}\n")
+                    text_widget.insert(tk.END, f"   Time: {info['time']}\n")
+                    text_widget.insert(tk.END, f"   Emotion: {info['emotion']}\n")
+                    text_widget.insert(tk.END, f"   Real Face: {info['is_real_face']}\n")
                     text_widget.insert(tk.END, "-" * 30 + "\n")
             else:
                 text_widget.insert(tk.END, "No attendance records for today\n")

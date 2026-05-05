@@ -13,9 +13,9 @@ try:
     from mysql_config import MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE, MYSQL_PORT
     from gui_simple_mysql import SimpleMySQLAttendanceGUI
     
-    print("🚀 Starting Advanced Face Recognition System (MySQL)...")
-    print("📊 Connected to MySQL database")
-    print("🔒 Advanced features enabled: Anti-spoofing, Emotion Detection, Unknown Face Alerts")
+    print("[INFO] Starting Advanced Face Recognition System (MySQL)...")
+    print("[DB] Connected to MySQL database")
+    print("[AI] Advanced features enabled: Anti-spoofing, Emotion Detection, Unknown Face Alerts")
     print("=" * 60)
     
     # Create application with MySQL configuration
@@ -30,10 +30,10 @@ try:
     app.run()
     
 except ImportError as e:
-    print(f"❌ Import Error: {e}")
+    print(f"[ERROR] Import Error: {e}")
     print("Please run setup_mysql.py first to configure MySQL")
     sys.exit(1)
     
 except Exception as e:
-    print(f"❌ Error starting application: {e}")
+    print(f"[ERROR] Error starting application: {e}")
     sys.exit(1)
