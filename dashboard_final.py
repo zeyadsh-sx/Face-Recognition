@@ -97,514 +97,569 @@ def dashboard():
         return Response(error_html, content_type='text/html; charset=utf-8')
 # The real generate_dashboard_html() function is defined below.
 def generate_dashboard_html(stats, attendance_records):
-    
     emotion_html = ""
     if stats['emotion_summary']:
         for emotion, count in stats['emotion_summary'].items():
+            percentage = (count / stats['present_students'] * 100) if stats['present_students'] > 0 else 0
             emotion_html += f"""
-            <div class="d-flex justify-content-between mb-2">
-                <span>{emotion.capitalize()}</span>
-                <span class="badge bg-primary">{count}</span>   
+            <div class="emotion-card">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="emotion-name">{emotion.capitalize()}</span>
+                    <span class="emotion-count">{count}</span>
+                </div>
+                <div class="progress" style="height: 6px; background: rgba(255,255,255,0.1);">
+                    <div class="progress-bar bg-primary" role="progressbar" style="width: {percentage}%"></div>
+                </div>
             </div>
             """
     else:
-        emotion_html = '<p class="text-muted">No emotion data available</p>'
+        emotion_html = '<p class="text-muted opacity-50">No emotion data available</p>'
 
     attendance_html = ""
     if attendance_records:
         for record in attendance_records:
-            emotion_badge = f'<span class="badge bg-info">{record["emotion"]}</span>' if record.get('emotion') else 'N/A'
-            real_face_icon = '✅' if record.get('is_real_face') else '❌'
-
+            emotion = record.get('emotion', 'neutral')
+            is_real = record.get('is_real_face', True)
+            
+            status_class = "status-real" if is_real else "status-fake"
+            status_text = "Real" if is_real else "Spoof"
+            
             attendance_html += f"""
-            <tr>
-                <td>{record['name']}</td>
-                <td>{record['time']}</td>
-                <td>{emotion_badge}</td>
-                <td>{real_face_icon}</td>
-            </tr>
+            <div class="attendance-row">
+                <div class="attendance-info">
+                    <div class="student-avatar">{record['name'][0].upper()}</div>
+                    <div class="student-details">
+                        <span class="student-name">{record['name']}</span>
+                        <span class="attendance-time">{record['time']}</span>
+                    </div>
+                </div>
+                <div class="attendance-meta">
+                    <span class="badge-emotion">{emotion}</span>
+                    <span class="badge-status {status_class}">{status_text}</span>
+                </div>
+            </div>
             """
     else:
-        attendance_html = "<p>No attendance records for today</p>"
+        attendance_html = """
+        <div class="text-center py-5 opacity-50">
+            <div class="fs-1 mb-3">📭</div>
+            <p>No attendance records for today</p>
+        </div>
+        """
 
     return f"""
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Recognition Attendance</title>
+    <title>Smart Attendance | AI Dashboard</title>
     <link rel="shortcut icon" href="/frontend/immigration.png" type="image/x-icon">
-    <link rel="stylesheet" href="/frontend/bootstrap.min.css">
-    <link rel="stylesheet" href="/frontend/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-light: #f8fafc;
+            --bg-card: rgba(255, 255, 255, 0.8);
+            --primary: #2563eb;
+            --primary-glow: rgba(37, 99, 235, 0.2);
+            --accent: #059669;
+            --text-main: #0f172a;
+            --text-dim: #64748b;
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --sidebar-bg: #ffffff;
+        }}
+
+        body {{
+            background-color: var(--bg-light);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(5, 150, 105, 0.05) 0%, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            min-height: 100vh;
+            margin: 0;
+            overflow-x: hidden;
+        }}
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {{ width: 8px; }}
+        ::-webkit-scrollbar-track {{ background: transparent; }}
+        ::-webkit-scrollbar-thumb {{ background: #e2e8f0; border-radius: 10px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: #cbd5e1; }}
+
+        .glass-panel {{
+            background: var(--bg-card);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
+        }}
+
+        /* Layout */
+        .app-container {{
+            display: flex;
+            min-height: 100vh;
+        }}
+
+        /* Sidebar */
+        .sidebar {{
+            width: 280px;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            position: fixed;
+            height: calc(100vh - 2rem);
+            z-index: 1000;
+            background: var(--sidebar-bg);
+            border: 1px solid #e2e8f0;
+        }}
+
+        .logo-area {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.5rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin-bottom: 1rem;
+            color: var(--text-main);
+        }}
+
+        .logo-icon {{
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), #7c3aed);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }}
+
+        .nav-link {{
+            color: var(--text-dim);
+            padding: 12px 20px;
+            border-radius: 16px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border: 1px solid transparent;
+            text-decoration: none;
+        }}
+
+        .nav-link:hover {{
+            background: #f1f5f9;
+            color: var(--primary);
+        }}
+
+        .nav-link.active {{
+            background: #eff6ff;
+            color: var(--primary);
+            border-color: #dbeafe;
+        }}
+
+        /* Main Content */
+        .main-content {{
+            flex: 1;
+            margin-left: 280px;
+            padding: 2rem 3rem;
+        }}
+
+        /* Stat Cards */
+        .stat-grid {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+        }}
+
+        .stat-card {{
+            padding: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }}
+
+        .stat-card:hover {{
+            transform: translateY(-5px);
+        }}
+
+        .stat-label {{
+            color: var(--text-dim);
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .stat-value {{
+            font-size: 2.25rem;
+            font-weight: 800;
+            margin: 0.5rem 0;
+            display: block;
+            color: var(--text-main);
+        }}
+
+        .stat-icon {{
+            position: absolute;
+            right: -10px;
+            bottom: -10px;
+            font-size: 4rem;
+            opacity: 0.1;
+        }}
+
+        /* Emotion Summary */
+        .emotion-grid {{
+            display: grid;
+            gap: 1rem;
+        }}
+
+        .emotion-card {{
+            background: #f8fafc;
+            padding: 12px 16px;
+            border-radius: 16px;
+            border: 1px solid #e2e8f0;
+        }}
+
+        .emotion-name {{ font-weight: 600; color: var(--text-dim); }}
+        .emotion-count {{ font-weight: 800; color: var(--primary); }}
+
+        /* Attendance List */
+        .attendance-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 500px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+        }}
+
+        .attendance-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            background: #ffffff;
+            border-radius: 18px;
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
+        }}
+
+        .attendance-row:hover {{
+            background: #f8fafc;
+            transform: translateX(5px);
+            border-color: var(--primary);
+        }}
+
+        .attendance-info {{
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }}
+
+        .student-avatar {{
+            width: 44px;
+            height: 44px;
+            background: #f1f5f9;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            color: var(--primary);
+            font-size: 1.25rem;
+            border: 1px solid #e2e8f0;
+        }}
+
+        .student-details {{ display: flex; flex-direction: column; }}
+        .student-name {{ font-weight: 700; font-size: 1.05rem; color: var(--text-main); }}
+        .attendance-time {{ font-size: 0.85rem; color: var(--text-dim); }}
+
+        .badge-emotion {{
+            padding: 4px 12px;
+            background: #eff6ff;
+            color: var(--primary);
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }}
+
+        .badge-status {{
+            padding: 4px 12px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-left: 8px;
+        }}
+
+        .status-real {{ background: #ecfdf5; color: var(--accent); }}
+        .status-fake {{ background: #fef2f2; color: #ef4444; }}
+
+        /* Headers */
+        .section-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }}
+
+        .section-title {{
+            font-size: 1.25rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-main);
+        }}
+
+        .section-title i {{ color: var(--primary); }}
+
+        /* Stat Cards Colors */
+        .stat-card.blue {{ border-left: 4px solid #3b82f6; }}
+        .stat-card.blue .stat-icon {{ color: #3b82f6; opacity: 0.15; }}
+        .stat-card.blue .stat-value {{ color: #1e40af; }}
+
+        .stat-card.green {{ border-left: 4px solid #10b981; }}
+        .stat-card.green .stat-icon {{ color: #10b981; opacity: 0.15; }}
+        .stat-card.green .stat-value {{ color: #065f46; }}
+
+        .stat-card.red {{ border-left: 4px solid #ef4444; }}
+        .stat-card.red .stat-icon {{ color: #ef4444; opacity: 0.15; }}
+        .stat-card.red .stat-value {{ color: #991b1b; }}
+
+        .stat-card.orange {{ border-left: 4px solid #f59e0b; }}
+        .stat-card.orange .stat-icon {{ color: #f59e0b; opacity: 0.15; }}
+        .stat-card.orange .stat-value {{ color: #92400e; }}
+
+        /* Charts */
+        .chart-card {{ padding: 2rem; min-height: 400px; }}
+
+        /* Search Input Override */
+        #searchInput {{
+            background: white !important;
+            color: var(--text-main) !important;
+            border: 1px solid #e2e8f0 !important;
+        }}
+
+        .form-control::placeholder {{
+            color: #94a3b8;
+        }}
+
+        /* Tabs override */
+        .nav-link i {{
+            font-style: normal;
+        }}
+
+        /* Responsive */
+        @media (max-width: 1200px) {{
+            .stat-grid {{ grid-template-columns: repeat(2, 1fr); }}
+        }}
+
+        @media (max-width: 768px) {{
+            .sidebar {{ display: none; }}
+            .main-content {{ margin-left: 0; padding: 1.5rem; }}
+            .stat-grid {{ grid-template-columns: 1fr; }}
+        }}
+    </style>
 </head>
-
-<body class="min-vh-100 overflow-x-hidden">
-    <div class="d-flex align-items-start">
-        <div class="nav nav-pills vh-100 position-lg-fixed flex-column gap-4 fw-bold mt-3 me-3 bg-white"
-            id="v-pills-tab" role="tablist" aria-orientation="vertical">
-            <button class="nav-link active" id="dashboard-tab" data-bs-toggle="pill" data-bs-target="#dashboard"
-                type="button" role="tab" aria-controls="dashboard" aria-selected="true">Dashboard</button>
-            <button class="nav-link" id="search-tab" data-bs-toggle="pill" data-bs-target="#search" type="button"
-                role="tab" aria-controls="search" aria-selected="false">Search</button>
-            <button class="nav-link" id="charts-tab" data-bs-toggle="pill" data-bs-target="#charts" type="button"
-                role="tab" aria-controls="charts" aria-selected="false">Charts</button>
-        </div>
-        <div class="tab-content flex-grow-1" id="v-pills-tabContent">
-            <div class="tab-pane fade show active" id="dashboard" role="tabpanel" aria-labelledby="dashboard-tab"
-                tabindex="0">
-                <!-- //// header start -->
-                <header class="position-sticky z-3 top-0 border-bottom">
-                    <nav class="navbar mx-auto py-3 p-0">
-                        <div class="container">
-                            <a class="d-flex align-items-center gap-2 fs-4 fw-bold lh-sm text-danger text-decoration-none"
-                                href="#home">
-                                <span class="d-flex justify-content-center align-items-center rounded-12 nav-logo">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="20px"
-                                        height="20px" fill="#fff">
-                                        <path
-                                            d="M0 256a256 256 0 1 1 512 0 256 256 0 1 1 -512 0zM288 96a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zM256 416c35.3 0 64-28.7 64-64 0-16.2-6-31.1-16-42.3l69.5-138.9c5.9-11.9 1.1-26.3-10.7-32.2s-26.3-1.1-32.2 10.7L261.1 288.2c-1.7-.1-3.4-.2-5.1-.2-35.3 0-64 28.7-64 64s28.7 64 64 64zM176 144a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zM96 288a32 32 0 1 0 0-64 32 32 0 1 0 0 64zm352-32a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z" />
-                                    </svg>
-                                </span>
-                                MySQL <span class="text-primary">Dashboard</span>
-                            </a>
-                        </div>
-                    </nav>
-                </header>
-                <!-- //// header end-->
-                <!-- /* ////// main start ////// */ -->
-                <main id="home" class="py-32 mx-auto">
-                    <!-- ///// top boxs start ///// -->
-                    <section class="mb-32">
-                        <div class="row g-3">
-                            <div class="col-12 col-md-6 col-lg-3">
-                                <div
-                                    class="px-3 py-2 top-box bg-white rounded-4 border border-danger d-flex align-items-center gap-3">
-                                    <div
-                                        class="top-box-svg d-flex justify-content-center blue-box align-items-center rounded-12">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" width="20px"
-                                            height="20px" fill="#fff">
-                                            <path
-                                                d="M320 16a104 104 0 1 1 0 208 104 104 0 1 1 0-208zM96 88a72 72 0 1 1 0 144 72 72 0 1 1 0-144zM0 416c0-70.7 57.3-128 128-128 12.8 0 25.2 1.9 36.9 5.4-32.9 36.8-52.9 85.4-52.9 138.6l0 16c0 11.4 2.4 22.2 6.7 32L32 480c-17.7 0-32-14.3-32-32l0-32zm521.3 64c4.3-9.8 6.7-20.6 6.7-32l0-16c0-53.2-20-101.8-52.9-138.6 11.7-3.5 24.1-5.4 36.9-5.4 70.7 0 128 57.3 128 128l0 32c0 17.7-14.3 32-32 32l-86.7 0zM472 160a72 72 0 1 1 144 0 72 72 0 1 1 -144 0zM160 432c0-88.4 71.6-160 160-160s160 71.6 160 160l0 16c0 17.7-14.3 32-32 32l-256 0c-17.7 0-32-14.3-32-32l0-16z" />
-                                        </svg>
-                                    </div>
-                                    <article>
-                                        <p class="mb-0 text-uppercase fw-semibold fs-12 text-light mt-2">total students
-                                        </p>
-                                        <span class="fs-4 text-danger fw-bold">{stats['total_students']}</span>
-                                    </article>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6 col-lg-3">
-                                <div
-                                    class="px-3 py-2 top-box bg-white rounded-4 border border-danger d-flex align-items-center gap-3">
-                                    <div
-                                        class="top-box-svg d-flex justify-content-center orange-box align-items-center rounded-12">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" width="20px"
-                                            height="20px" fill="#fff">
-                                            <path
-                                                d="M280 24a56 56 0 1 0 -112 0 56 56 0 1 0 112 0zm24 212.7L341 286.6c12.8-17.5 28.5-32.7 46.3-45l-56.2-75.7C306 132 266.3 112 224 112s-82 20-107.2 53.9l-70.5 95c-10.5 14.2-7.6 34.2 6.6 44.8s34.2 7.6 44.8-6.6L144 236.7 144 512c0 17.7 14.3 32 32 32s32-14.3 32-32l0-160c0-8.8 7.2-16 16-16s16 7.2 16 16l0 160c0 17.7 14.3 32 32 32s32-14.3 32-32l0-275.3zM640 400a144 144 0 1 0 -288 0 144 144 0 1 0 288 0zm-86.6-60.9c7.1 5.2 8.7 15.2 3.5 22.3l-64 88c-2.8 3.8-7 6.2-11.7 6.5s-9.3-1.3-12.6-4.6l-40-40c-6.2-6.2-6.2-16.4 0-22.6s16.4-6.2 22.6 0l26.8 26.8 53-72.9c5.2-7.1 15.2-8.7 22.4-3.5z" />
-                                        </svg>
-                                    </div>
-                                    <article>
-                                        <p class="mb-0 text-uppercase fw-semibold fs-12 text-light mt-2">present today
-                                        </p>
-                                        <span class="fs-4 text-danger fw-bold">{stats['present_students']}</span>
-                                    </article>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6 col-lg-3">
-                                <div
-                                    class="px-3 py-2 top-box bg-white rounded-4 border border-danger d-flex align-items-center gap-3">
-                                    <div
-                                        class="top-box-svg d-flex justify-content-center red-box align-items-center rounded-12">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" width="20px"
-                                            height="20px" fill="#fff">
-                                            <path
-                                                d="M280 24a56 56 0 1 0 -112 0 56 56 0 1 0 112 0zm24 212.7L341 286.6c12.8-17.5 28.5-32.7 46.3-45l-56.2-75.7C306 132 266.3 112 224 112s-82 20-107.2 53.9l-70.5 95c-10.5 14.2-7.6 34.2 6.6 44.8s34.2 7.6 44.8-6.6L144 236.7 144 512c0 17.7 14.3 32 32 32s32-14.3 32-32l0-160c0-8.8 7.2-16 16-16s16 7.2 16 16l0 160c0 17.7 14.3 32 32 32s32-14.3 32-32l0-275.3zM496 544a144 144 0 1 0 0-288 144 144 0 1 0 0 288zm22.6-144l36.7 36.7c6.2 6.2 6.2 16.4 0 22.6s-16.4 6.2-22.6 0l-36.7-36.7-36.7 36.7c-6.2 6.2-16.4 6.2-22.6 0s-6.2-16.4 0-22.6l36.7-36.7-36.7-36.7c-6.2-6.2-6.2-16.4 0-22.6s16.4-6.2 22.6 0l36.7 36.7 36.7-36.7c6.2-6.2 16.4-6.2 22.6 0s6.2 16.4 0 22.6L518.6 400z" />
-                                        </svg>
-                                    </div>
-                                    <article>
-                                        <p class="mb-0 text-uppercase fw-semibold fs-12 text-light mt-2">absent today
-                                        </p>
-                                        <span class="fs-4 text-danger fw-bold">{stats['absent_students']}</span>
-                                    </article>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6 col-lg-3">
-                                <div
-                                    class="px-3 py-2 top-box bg-white rounded-4 border border-danger d-flex align-items-center gap-3">
-                                    <div
-                                        class="top-box-svg d-flex justify-content-center mix-box align-items-center rounded-12">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="20px"
-                                            height="20px" fill="#fff">
-                                            <path
-                                                d="M192 128a96 96 0 1 0 -192 0 96 96 0 1 0 192 0zM448 384a96 96 0 1 0 -192 0 96 96 0 1 0 192 0zM438.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-384 384c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l384-384z" />
-                                        </svg>
-                                    </div>
-                                    <article>
-                                        <p class="mb-0 text-uppercase fw-semibold fs-12 text-light mt-2">attendance rate
-                                        </p>
-                                        <span class="fs-4 text-danger fw-bold">{stats['attendance_rate']}%</span>
-                                    </article>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                    <!-- ///// top boxs end ///// -->
-                    <!-- /* ///mid boxs start /// */ -->
-                    <section class="mb-32">
-                        <div class="row g-3">
-                            <div class="col-12 col-md-6">
-                                <div class="bg-white rounded-4 overflow-hidden border border-danger mid-boxs">
-                                    <div
-                                        class="py-3 px-4 border-bottom-1 border-danger red-bg d-flex align-items-center gap-3">
-                                        <div
-                                            class="red-box justify-content-center align-items-center d-flex rounded-3 mid-box-svg">
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="#fff"
-                                                width="18px" height="18px">
-                                                <path
-                                                    d="M256 512a256 256 0 1 1 0-512 256 256 0 1 1 0 512zm0-192a32 32 0 1 0 0 64 32 32 0 1 0 0-64zm0-192c-18.2 0-32.7 15.5-31.4 33.7l7.4 104c.9 12.6 11.4 22.3 23.9 22.3 12.6 0 23-9.7 23.9-22.3l7.4-104c1.3-18.2-13.1-33.7-31.4-33.7z" />
-                                            </svg>
-                                        </div>
-                                        <article>
-                                            <h2 class="text-danger fw-bold fs-5 mt-1">Security Alerts</h2>
-                                        </article>
-                                    </div>
-                                    <div class="px-32 py-3 bg-white inner-box d-flex flex-column gap-3">
-                                        <div class="d-flex justify-content-between align-items-center border-bottom">
-                                            <div class="d-flex gap-2">
-                                                <div
-                                                    class="outer-online rounded-2 d-flex justify-content-center align-items-center">
-                                                    <div class="rounded-circle bg-success inner-online"></div>
-                                                </div>
-                                                <p class="text-light fs-14">Active Alerts</p>
-                                            </div>
-                                            <span
-                                                class="fs-6 fw-semibold text-danger mb-1">{stats['active_alerts']}</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between align-items-center border-bottom">
-                                            <div class="d-flex gap-2">
-                                                <div
-                                                    class="outer-online rounded-2 d-flex justify-content-center align-items-center">
-                                                    <div class="rounded-circle bg-success inner-online"></div>
-                                                </div>
-                                                <p class="text-light fs-14">System Status</p>
-                                            </div>
-                                            <div class="bg-success bg-opacity-25 px-2 rounded-pill mb-3">
-                                                <small class="text-success">connected</small>
-                                            </div>
-                                        </div>
-                                        <div class="d-flex justify-content-between align-items-center">
-                                            <div class="d-flex gap-2">
-                                                <div
-                                                    class="outer-online rounded-2 d-flex justify-content-center align-items-center">
-                                                    <div class="rounded-circle bg-success inner-online"></div>
-                                                </div>
-                                                <p class="text-light fs-14 mb-0">Last Updated</p>
-                                            </div>
-                                            <span class="fs-6 fw-semibold text-danger">{stats['date']}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-12 col-md-6">
-                                <div class="bg-white rounded-4 overflow-hidden border border-danger mid-boxs">
-                                    <div
-                                        class="py-3 px-4 border-bottom-1 border-danger yellow-bg d-flex align-items-center gap-3">
-                                        <div
-                                            class="orange-box justify-content-center align-items-center d-flex rounded-3 mid-box-svg">
-                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="#fff"
-                                                width="18px" height="18px">
-                                                <path
-                                                    d="M256 512a256 256 0 1 0 0-512 256 256 0 1 0 0 512zM386.7 308.9c11.9-3.7 23.9 6.3 19.6 18.1-22.4 61.3-81.3 105.1-150.3 105.1S128.1 388.2 105.7 326.9c-4.3-11.8 7.7-21.8 19.6-18.1 39.2 12.2 83.7 19.1 130.7 19.1s91.5-6.9 130.7-19.1zM328 196c-11 0-20 9-20 20s-9 20-20 20-20-9-20-20c0-33.1 26.9-60 60-60l16 0c33.1 0 60 26.9 60 60 0 11-9 20-20 20s-20-9-20-20-9-20-20-20l-16 0zM176 176a32 32 0 1 1 0 64 32 32 0 1 1 0-64z" />
-                                            </svg>
-                                        </div>
-                                        <article>
-                                            <h2 class="text-danger fw-bold fs-5 mt-1">Emotion Summary</h2>
-                                        </article>
-                                    </div>
-                                    <div
-                                        class="px-32 py-3 bg-white d-flex justify-content-center align-items-center inner-box">
-                                        <p class="text-light fs-14 opacity-75">{emotion_html}</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                    <!-- /* ///mid boxs end /// */ -->
-                    <!-- /// last box start /// -->
-
-                    <section class="mb-32">
-                        <div class="bg-white rounded-4 overflow-hidden border border-danger mid-boxs">
-                            <div
-                                class="py-3 px-4 border-bottom-1 border-danger blue-bg d-flex align-items-center gap-3 justify-content-between">
-                                <div class="d-flex gap-2 align-items-center">
-                                    <div
-                                        class="blue-box justify-content-center align-items-center d-flex rounded-3 mid-box-svg">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="#fff"
-                                            width="18px" height="18px">
-                                            <path
-                                                d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 32 0c35.3 0 64 28.7 64 64l0 288c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 128C0 92.7 28.7 64 64 64l32 0 0-32c0-17.7 14.3-32 32-32zm0 256c-17.7 0-32 14.3-32 32l0 64c0 17.7 14.3 32 32 32l192 0c17.7 0 32-14.3 32-32l0-64c0-17.7-14.3-32-32-32l-192 0z" />
-                                        </svg>
-                                    </div>
-                                    <article>
-                                        <h2 class="text-danger fw-bold fs-5 mt-1 mb-1">Today's Attendance</h2>
-                                    </article>
-                                </div>
-                                <div>
-                                    <button type="button"
-                                        class="btn btn-outline-primary d-flex align-items-center gap-2">
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="16px"
-                                            height="16px" fill="#0D6EFD">
-                                            <path
-                                                d="M65.9 228.5c13.3-93 93.4-164.5 190.1-164.5 53 0 101 21.5 135.8 56.2 .2 .2 .4 .4 .6 .6l7.6 7.2-47.9 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l128 0c17.7 0 32-14.3 32-32l0-128c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 53.4-11.3-10.7C390.5 28.6 326.5 0 256 0 127 0 20.3 95.4 2.6 219.5 .1 237 12.2 253.2 29.7 255.7s33.7-9.7 36.2-27.1zm443.5 64c2.5-17.5-9.7-33.7-27.1-36.2s-33.7 9.7-36.2 27.1c-13.3 93-93.4 164.5-190.1 164.5-53 0-101-21.5-135.8-56.2-.2-.2-.4-.4-.6-.6l-7.6-7.2 47.9 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 320c-8.5 0-16.7 3.4-22.7 9.5S-.1 343.7 0 352.3l1 127c.1 17.7 14.6 31.9 32.3 31.7S65.2 496.4 65 478.7l-.4-51.5 10.7 10.1c46.3 46.1 110.2 74.7 180.7 74.7 129 0 235.7-95.4 253.4-219.5z" />
-                                        </svg>
-                                        Refresh</button>
-                                </div>
-                            </div>
-                            <div
-                                class="px-32 py-3 bg-white d-flex justify-content-center align-items-center flex-column inner-box gap-3">
-                                <div
-                                    class="justify-content-center align-items-center d-flex rounded-circle last-box-svg">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="#6a7282"
-                                        width="26px" height="26px">
-                                        <path
-                                            d="M128 0c17.7 0 32 14.3 32 32l0 32 128 0 0-32c0-17.7 14.3-32 32-32s32 14.3 32 32l0 32 32 0c35.3 0 64 28.7 64 64l0 288c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 128C0 92.7 28.7 64 64 64l32 0 0-32c0-17.7 14.3-32 32-32zm0 256c-17.7 0-32 14.3-32 32l0 64c0 17.7 14.3 32 32 32l192 0c17.7 0 32-14.3 32-32l0-64c0-17.7-14.3-32-32-32l-192 0z" />
-                                    </svg>
-                                </div>
-                                <article class="text-center">
-                                    <p class="mb-0 fw-bold text-danger">{attendance_html}</p>
-                                    <small class="text-light fs-12 opacity-75 fw-semibold">Data will appear here once
-                                        students
-                                        submit their attendance</small>
-                                </article>
-                            </div>
-                        </div>
-                    </section>
-                    <!-- /// last box end /// -->
-                </main>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar glass-panel m-3">
+            <div class="logo-area">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="white">
+                        <path d="M9 3v15h3V3H9m3 2l4 4.34L14.66 11 12 8.11V5M9 16.11l-2.66 2.89L5 17.66 9 13.34v2.77z"/>
+                    </svg>
+                </div>
+                <span>VisionAttend</span>
             </div>
+            
+            <nav class="nav flex-column gap-2 p-0 border-0">
+                <a class="nav-link active" data-bs-toggle="pill" href="#dashboard">
+                    <i class="bi bi-grid-1x2-fill"></i> Dashboard
+                </a>
+                <a class="nav-link" data-bs-toggle="pill" href="#search">
+                    <i class="bi bi-search"></i> Search & Logs
+                </a>
+                <a class="nav-link" data-bs-toggle="pill" href="#charts">
+                    <i class="bi bi-graph-up"></i> Analytics
+                </a>
+                <div class="mt-auto pt-4 border-top border-secondary opacity-25"></div>
+                <div class="p-2 text-center">
+                    <small class="text-dim">v1.2.0-stable</small>
+                </div>
+            </nav>
+        </aside>
 
-            <div class="tab-pane fade" id="search" role="tabpanel" aria-labelledby="search-tab" tabindex="0">
-                <!-- ===== ADVANCED SEARCH & FILTER SECTION ===== -->
-                <section class="search-filter-section bg-white py-3 px-4 my-3 rounded-3 ">
-                    <div class="search-filter-header">
-                        <div class="search-filter-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="white">
-                                <path
-                                    d="M416 208c0 45.9-14.9 88.3-40 122.7l126.6 126.7c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0s208 93.1 208 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144-144 64.5-144 144 64.5 144 144 144z" />
-                            </svg>
-                        </div>
-                        <div>
-                            <h2>Advanced Search & Filters</h2>
-                            <p class="text-secondary fs-14 mb-0">
-                                Search students and filter attendance records
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- Search Box -->
-                    <div class="search-box">
-                        <input type="text" id="searchInput" placeholder="Search for students by name..."
-                            autocomplete="off">
-                    </div>
-
-                    <div id="searchResults"></div>
-
-                    <!-- Filter Controls -->
-
-                    <h5 class="mt-4 mb-3">Filter Attendance Records</h5>
-
-                    <div class="filter-controls">
-                        <div class="filter-group">
-                            <label for="startDate">Start Date:</label>
-                            <input type="date" id="startDate">
-                        </div>
-
-                        <div class="filter-group">
-                            <label for="endDate">End Date:</label>
-                            <input type="date" id="endDate">
-                        </div>
-
-                        <div class="filter-group">
-                            <label for="departmentFilter">Department:</label>
-                            <select id="departmentFilter">
-                                <option value="">All Departments</option>
-                                <option value="IT">IT</option>
-                                <option value="Engineering">Engineering</option>
-                                <option value="Business">Business</option>
-                                <option value="Science">Science</option>
-                                <option value="Arts">Arts</option>
-                            </select>
-                        </div>
-
-                        <div class="filter-group">
-                            <label for="studentNameFilter">Student Name:</label>
-                            <input type="text" id="studentNameFilter" placeholder="Leave empty to include all">
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="tab-content" id="pills-tabContent">
+                <!-- Dashboard Pane -->
+                <div class="tab-pane fade show active" id="dashboard">
+                    <div class="section-header">
+                        <h1 class="h3 fw-bold mb-0">System Overview</h1>
+                        <div class="badge bg-primary bg-opacity-10 text-primary p-2 px-3 rounded-pill border border-primary border-opacity-25">
+                            Live Database Connected
                         </div>
                     </div>
 
-                    <!-- Action Buttons -->
-                    <div class="filter-buttons">
-                        <button class="filter-btn filter-btn-apply" onclick="searchFilter.applyFilters()">
-                            <span>🔍</span>
-                            Apply Filters
-                        </button>
-
-                        <button class="filter-btn filter-btn-reset" onclick="searchFilter.resetFilters()">
-                            <span>↺</span> Reset
-                        </button>
+                    <!-- Stats Grid -->
+                    <div class="stat-grid">
+                        <div class="stat-card glass-panel blue">
+                            <span class="stat-label">Total Students</span>
+                            <span class="stat-value">{stats['total_students']}</span>
+                            <i class="bi bi-people stat-icon"></i>
+                        </div>
+                        <div class="stat-card glass-panel green">
+                            <span class="stat-label">Present Today</span>
+                            <span class="stat-value">{stats['present_students']}</span>
+                            <i class="bi bi-person-check stat-icon"></i>
+                        </div>
+                        <div class="stat-card glass-panel red">
+                            <span class="stat-label">Absent Today</span>
+                            <span class="stat-value">{stats['absent_students']}</span>
+                            <i class="bi bi-person-x stat-icon"></i>
+                        </div>
+                        <div class="stat-card glass-panel orange">
+                            <span class="stat-label">Attendance Rate</span>
+                            <span class="stat-value">{stats['attendance_rate']}%</span>
+                            <i class="bi bi-pie-chart stat-icon"></i>
+                        </div>
                     </div>
 
-                    <!-- Export Buttons -->
-                    <div class="export-controls">
-                        <button class="export-btn export-btn-csv" id="exportCsvBtn" disabled>
-                            <span>📊</span> Export CSV
-                        </button>
-
-                        <button class="export-btn export-btn-json" id="exportJsonBtn" disabled>
-                            <span>📄</span> Export JSON
-                        </button>
-                    </div>
-
-                    <!-- Filter Results -->
-                    <div id="filterResults" class="mt-4"></div>
-                </section>
-                <!-- ===== END ADVANCED SEARCH & FILTER SECTION ===== -->
-
-            </div>
-
-            <div class="tab-pane fade" id="charts" role="tabpanel" aria-labelledby="charts-tab" tabindex="0">
-
-                <section class="mt-3">
-                    <button class="btn-refresh-charts px-3 py-2 rounded-pill fw-semibold text-white border-0"
-                        onclick="refreshCharts()">
-                        Refresh Charts
-                    </button>
-                </section>
-
-                <div class="row g-3 mt-2 mb-3">
-                    <div class=" col-12 col-lg-6">
-                        <div class="chart-section bg-white rounded-4 p-3">
-                            <div class="chart-header d-flex gap-2 mb-2 pb-2">
-                                <div
-                                    class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="1.25rem"
-                                        height="1.25rem"><!--!Font Awesome Free v7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free Copyright 2026 Fonticons, Inc.-->
-                                        <path fill="#fff"
-                                            d="M120 0c13.3 0 24 10.7 24 24l0 40 160 0 0-40c0-13.3 10.7-24 24-24s24 10.7 24 24l0 40 32 0c35.3 0 64 28.7 64 64l0 288c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 128C0 92.7 28.7 64 64 64l32 0 0-40c0-13.3 10.7-24 24-24zM384 432c8.8 0 16-7.2 16-16l0-64-88 0 0 80 72 0zm16-128l0-80-88 0 0 80 88 0zm-136 0l0-80-80 0 0 80 80 0zm-128 0l0-80-88 0 0 80 88 0zM48 352l0 64c0 8.8 7.2 16 16 16l72 0 0-80-88 0zm136 0l0 80 80 0 0-80-80 0zM120 112l-56 0c-8.8 0-16 7.2-16 16l0 48 352 0 0-48c0-8.8-7.2-16-16-16l-264 0z" />
-                                    </svg>
+                    <div class="row g-4">
+                        <!-- Attendance Feed -->
+                        <div class="col-lg-8">
+                            <div class="glass-panel p-4 h-100">
+                                <div class="section-header">
+                                    <h2 class="section-title"><i class="bi bi-clock-history"></i> Recent Activity</h2>
+                                    <button class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="location.reload()">Refresh Feed</button>
                                 </div>
-                                <div>
-                                    <h2 class="fw-bold fs-5 text-danger m-0">Daily Attendance</h2>
-                                    <p class="text-secondary fs-14 mb-0">Last 7 Days Trend</p>
+                                <div class="attendance-list">
+                                    {attendance_html}
                                 </div>
                             </div>
-                            <div
-                                class="chart-container d-flex justify-content-center align-items-center position-relative">
+                        </div>
+
+                        <!-- Emotion & System Info -->
+                        <div class="col-lg-4">
+                            <div class="glass-panel p-4 mb-4">
+                                <h2 class="section-title mb-4"><i class="bi bi-emoji-smile"></i> Emotion Profile</h2>
+                                <div class="emotion-grid">
+                                    {emotion_html}
+                                </div>
+                            </div>
+                            <div class="glass-panel p-4">
+                                <h2 class="section-title mb-3"><i class="bi bi-shield-check"></i> System Health</h2>
+                                <div class="d-flex justify-content-between mb-3 border-bottom border-secondary pb-2 border-opacity-10">
+                                    <span class="text-dim">Alerts</span>
+                                    <span class="fw-bold text-danger">{stats['active_alerts']}</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-3 border-bottom border-secondary pb-2 border-opacity-10">
+                                    <span class="text-dim">Last Sync</span>
+                                    <span class="fw-bold">{stats['date']}</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span class="text-dim">DB Status</span>
+                                    <span class="text-accent fw-bold" style="color: var(--accent)">Optimal</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Pane -->
+                <div class="tab-pane fade" id="search">
+                    <div class="glass-panel p-4">
+                        <div class="section-header">
+                            <h2 class="section-title"><i class="bi bi-search"></i> Data Explorer</h2>
+                        </div>
+                        <div class="input-group mb-4">
+                            <input type="text" id="searchInput" class="form-control bg-white text-dark border-secondary border-opacity-25 rounded-start-pill px-4" placeholder="Search by student name...">
+                            <button class="btn btn-primary rounded-end-pill px-4">Search</button>
+                        </div>
+                        <div id="searchResults" class="attendance-list mt-3"></div>
+                        
+                        <hr class="my-5 opacity-10">
+                        
+                        <h4 class="mb-4 fw-bold">Advanced Filters</h4>
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                <label class="text-dim small mb-2">Start Date</label>
+                                <input type="date" id="startDate" class="form-control bg-white text-dark border-secondary border-opacity-25">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="text-dim small mb-2">End Date</label>
+                                <input type="date" id="endDate" class="form-control bg-white text-dark border-secondary border-opacity-25">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="text-dim small mb-2">Department</label>
+                                <select id="departmentFilter" class="form-select bg-white text-dark border-secondary border-opacity-25">
+                                    <option value="">All</option>
+                                    <option value="IT">IT</option>
+                                    <option value="Engineering">Engineering</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 d-flex align-items-end">
+                                <button class="btn btn-primary w-100 rounded-pill" onclick="searchFilter.applyFilters()">Apply</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Analytics Pane -->
+                <div class="tab-pane fade" id="charts">
+                    <div class="row g-4">
+                        <div class="col-md-6">
+                            <div class="glass-panel chart-card">
+                                <h3 class="h5 fw-bold mb-4">Weekly Trend</h3>
                                 <canvas id="dailyAttendanceChart"></canvas>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="col-12 col-lg-6">
-                        <div class="chart-section bg-white rounded-4 p-3">
-                            <div class="chart-header d-flex gap-2 mb-2 pb-2">
-                                <div
-                                    class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1.25rem"
-                                        height="1.25rem">
-                                        <path fill="#fff"
-                                            d="M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64L0 400c0 44.2 35.8 80 80 80l400 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L80 416c-8.8 0-16-7.2-16-16L64 64zm406.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L320 210.7 262.6 153.4c-12.5-12.5-32.8-12.5-45.3 0l-96 96c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l73.4-73.4 57.4 57.4c12.5 12.5 32.8 12.5 45.3 0l128-128z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h2 class="fw-bold fs-5 text-danger m-0">Monthly Attendance</h2>
-                                    <p class="text-secondary fs-14 mb-0">Last 12 Months Average</p>
-                                </div>
-                            </div>
-                            <div
-                                class="chart-container d-flex justify-content-center align-items-center position-relative">
-                                <canvas id="monthlyAttendanceChart"></canvas>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class=" col-12 col-lg-6">
-                        <div class="chart-section bg-white rounded-4 p-3">
-                            <div class="chart-header d-flex gap-2 mb-2 pb-2">
-                                <div
-                                    class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1.25rem"
-                                        height="1.25rem">
-                                        <path fill="#fff"
-                                            d="M256 512a256 256 0 1 0 0-512 256 256 0 1 0 0 512zM386.7 308.9c11.9-3.7 23.9 6.3 19.6 18.1-22.4 61.3-81.3 105.1-150.3 105.1S128.1 388.2 105.7 326.9c-4.3-11.8 7.7-21.8 19.6-18.1 39.2 12.2 83.7 19.1 130.7 19.1s91.5-6.9 130.7-19.1zM328 196c-11 0-20 9-20 20s-9 20-20 20-20-9-20-20c0-33.1 26.9-60 60-60l16 0c33.1 0 60 26.9 60 60 0 11-9 20-20 20s-20-9-20-20-9-20-20-20l-16 0zM176 176a32 32 0 1 1 0 64 32 32 0 1 1 0-64z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h2 class="fw-bold fs-5 text-danger m-0">Emotion Distribution</h2>
-                                    <p class="text-secondary fs-14 mb-0">Today's Emotional States</p>
-                                </div>
-                            </div>
-                            <div
-                                class="chart-container d-flex justify-content-center align-items-center position-relative">
+                        <div class="col-md-6">
+                            <div class="glass-panel chart-card">
+                                <h3 class="h5 fw-bold mb-4">Emotion Analytics</h3>
                                 <canvas id="emotionChart"></canvas>
                             </div>
                         </div>
-                    </div>
-
-                    <div class=" col-12 col-lg-6">
-                        <div class="chart-section bg-white rounded-4 p-3">
-                            <div class="chart-header d-flex gap-2 mb-2 pb-2">
-                                <div
-                                    class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1.25rem"
-                                        height="1.25rem">
-                                        <path fill="#fff"
-                                            d="M464 256a208 208 0 1 1 -416 0 208 208 0 1 1 416 0zM0 256a256 256 0 1 0 512 0 256 256 0 1 0 -512 0zM232 120l0 136c0 8 4 15.5 10.7 20l96 64c11 7.4 25.9 4.4 33.3-6.7s4.4-25.9-6.7-33.3L280 243.2 280 120c0-13.3-10.7-24-24-24s-24 10.7-24 24z" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h2 class="fw-bold fs-5 text-danger m-0">Hourly Breakdown</h2>
-                                    <p class="text-secondary fs-14 mb-0">Today's Attendance by Hour</p>
-                                </div>
-                            </div>
-                            <div
-                                class="chart-container d-flex justify-content-center align-items-center position-relative">
-                                <canvas id="hourlyAttendanceChart"></canvas>
+                        <div class="col-md-12">
+                            <div class="glass-panel chart-card">
+                                <h3 class="h5 fw-bold mb-4">Monthly Overview</h3>
+                                <canvas id="monthlyAttendanceChart"></canvas>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </main>
     </div>
 
-
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
-    <script src="/frontend/bootstrap.bundle.min.js"></script>
-    <script>
-        function downloadReport(event) {{
-            event.preventDefault();
-            const startDate = document.getElementById("start-date").value;
-            const endDate = document.getElementById("end-date").value;
-            const format = document.getElementById("export-format").value;
-            if (!startDate || !endDate) {{
-                alert("Please select both start and end dates.");
-                return false;
-            }}
-            const url = `/api/reports/export?start=${{encodeURIComponent(startDate)}}&end=${{encodeURIComponent(endDate)}}&format=${{encodeURIComponent(format)}}`;
-            window.open(url, '_blank');
-            return false;
-        }}
-    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/frontend/index.js"></script>
     <script src="/frontend/charts.js"></script>
     <script src="/frontend/search.js"></script>
+    <script>
+        // Tab handling
+        document.querySelectorAll('.nav-link').forEach(tab => {{
+            tab.addEventListener('click', function(e) {{
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('show', 'active'));
+                target.classList.add('show', 'active');
+                document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                this.classList.add('active');
+            }});
+        }});
+    </script>
 </body>
-
 </html>
     """
 def generate_error_html(error_message):
