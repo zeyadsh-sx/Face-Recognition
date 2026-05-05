@@ -7,14 +7,14 @@
         "port": 3306
     },
     "camera": {
-        "device_id": 0,
+        "device_id": 1,
         "resolution": "640x480",
         "fps": 30,
-        "brightness": 50,
-        "contrast": 50
+        "brightness": 44,
+        "contrast": 52
     },
     "face_recognition": {
-        "tolerance": 0.6,
+        "tolerance": 0.1,
         "model": "hog",
         "upsample_times": 1,
         "num_jitters": 1,
@@ -40,8 +40,8 @@
         "max_backup_files": 10
     },
     "ui": {
-        "theme": "light",
-        "language": "ar",
+        "theme": "dark",
+        "language": "en",
         "auto_refresh_stats": true,
         "refresh_interval_seconds": 3,
         "show_emojis": true
