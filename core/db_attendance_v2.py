@@ -46,6 +46,7 @@ class AttendanceDBExtensions:
             ("section", "VARCHAR(100) NULL"),
             ("year_level", "VARCHAR(50) NULL"),
             ("group_name", "VARCHAR(100) NULL"),
+            ("email", "VARCHAR(255) NULL"),
         ]:
             if not self._column_exists(cursor, "students", col):
                 cursor.execute(f"ALTER TABLE students ADD COLUMN {col} {definition}")
@@ -126,6 +127,7 @@ class AttendanceDBExtensions:
             "section": row.get("section"),
             "year_level": row.get("year_level"),
             "group_name": row.get("group_name"),
+            "email": row.get("email"),
             "face_encoding": pickle.loads(row["face_encoding"]) if row.get("face_encoding") else None,
             "image_path": row.get("image_path"),
             "status": row.get("status"),
@@ -136,7 +138,7 @@ class AttendanceDBExtensions:
 
     def _student_select_sql(self) -> str:
         return """
-            SELECT id, name, student_code, section, year_level, group_name,
+            SELECT id, name, student_code, section, year_level, group_name, email,
                    face_encoding, image_path, status, notes, created_at, updated_at
             FROM students
         """
@@ -151,6 +153,7 @@ class AttendanceDBExtensions:
         section: Optional[str] = None,
         year_level: Optional[str] = None,
         group_name: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> Optional[int]:
         try:
             with self.get_connection() as conn:
@@ -159,8 +162,8 @@ class AttendanceDBExtensions:
                 cursor.execute(
                     """
                     INSERT INTO students
-                    (name, face_encoding, image_path, notes, student_code, section, year_level, group_name)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (name, face_encoding, image_path, notes, student_code, section, year_level, group_name, email)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE
                         face_encoding = COALESCE(VALUES(face_encoding), face_encoding),
                         image_path = VALUES(image_path),
@@ -169,9 +172,10 @@ class AttendanceDBExtensions:
                         section = VALUES(section),
                         year_level = VALUES(year_level),
                         group_name = VALUES(group_name),
+                        email = COALESCE(VALUES(email), email),
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (name, encoding_blob, image_path, notes, student_code, section, year_level, group_name),
+                    (name, encoding_blob, image_path, notes, student_code, section, year_level, group_name, email),
                 )
                 cursor.execute("SELECT id FROM students WHERE name = %s", (name,))
                 student_id = cursor.fetchone()[0]
@@ -328,6 +332,7 @@ class AttendanceDBExtensions:
                 "name": st["name"],
                 "student_code": st.get("student_code") or "",
                 "section": st.get("section") or "",
+                "email": st.get("email") or "",
             }
             if rec:
                 entry.update(rec)
@@ -483,6 +488,7 @@ class AttendanceDBExtensions:
         section: Optional[str] = None,
         year_level: Optional[str] = None,
         group_name: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> Optional[int]:
         unknown_dir = UNKNOWN_FACES_DIR / temp_id
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name.strip())
@@ -495,6 +501,7 @@ class AttendanceDBExtensions:
         student_id = self.add_student_with_profile(
             name, face_encoding, image_path, notes=f"promoted_from:{temp_id}",
             student_code=student_code, section=section, year_level=year_level, group_name=group_name,
+            email=email,
         )
         if student_id:
             try:
@@ -514,7 +521,7 @@ class AttendanceDBExtensions:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute(
                     """
-                    SELECT s.name, s.student_code, s.section, a.time, a.check_in_time, a.check_out_time,
+                    SELECT s.name, s.student_code, s.section, s.email, a.time, a.check_in_time, a.check_out_time,
                            a.attendance_status, a.late_minutes, a.emotion, a.is_real_face, a.image_path
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id

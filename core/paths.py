@@ -11,9 +11,11 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 KNOWN_FACES_DIR = DATA_DIR / "known_faces"
 UNKNOWN_FACES_DIR = DATA_DIR / "unknown_faces"
 ATTENDANCE_IMAGES_DIR = DATA_DIR / "attendance_images"
+REPORTS_DIR = DATA_DIR / "reports"
 
 UNKNOWN_COUNTER_FILE = DATA_DIR / ".unknown_counter.json"
 SYSTEM_SETTINGS_FILE = CONFIG_DIR / "system_settings.json"
+EMAIL_CONFIG_FILE = CONFIG_DIR / "email_config.json"
 
 # Legacy paths at project root (for older scripts)
 LEGACY_KNOWN_FACES = PROJECT_ROOT / "known_faces"
@@ -28,6 +30,7 @@ def ensure_data_dirs() -> None:
         KNOWN_FACES_DIR,
         UNKNOWN_FACES_DIR,
         ATTENDANCE_IMAGES_DIR,
+        REPORTS_DIR,
         CONFIG_DIR,
     ):
         path.mkdir(parents=True, exist_ok=True)

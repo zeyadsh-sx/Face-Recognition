@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.database_core_mysql import MySQLAttendanceDatabase
+from core.email_service import EmailNotifier, load_email_config
 from core.features_ai_advanced import AntiSpoofing, MaskDetector
+from core.pdf_export import export_attendance_report_pdf
+from core.paths import REPORTS_DIR
 
 
 def load_settings() -> Dict:
@@ -42,6 +45,8 @@ class AttendanceService:
         self.lecture_late_threshold: int = self.settings["late_threshold_minutes"]
         self.lecture_section: Optional[str] = None
         self.session_present_ids: set = set()
+        self.email_notifier = EmailNotifier()
+        self.last_lecture_name: Optional[str] = None
         self._refresh_active_lecture()
 
     def _refresh_active_lecture(self) -> None:
@@ -67,6 +72,7 @@ class AttendanceService:
         )
         if ok:
             self.active_lecture_id = lecture_id
+            self.last_lecture_name = name
             self.lecture_start_time = datetime.now()
             self.lecture_late_threshold = threshold
             self.lecture_section = section
@@ -82,17 +88,62 @@ class AttendanceService:
             list(self.session_present_ids),
             self.lecture_section,
         )
-        board = self.db.get_attendance_board(date.today().isoformat(), self.active_lecture_id)
-        self.db.end_lecture_session(self.active_lecture_id, emotions_summary={})
+        lecture_id_done = self.active_lecture_id
+        lecture_title = self.last_lecture_name or lecture_id_done
+        board = self.db.get_attendance_board(date.today().isoformat(), lecture_id_done)
+        report = self.export_absence_report()
+        self.db.end_lecture_session(lecture_id_done, emotions_summary={})
+
+        email_ok, email_msg = False, "البريد معطّل"
+        email_cfg = load_email_config()
+        if email_cfg.get("enabled") and email_cfg.get("notify_on_lecture_end"):
+            email_ok, email_msg = self.email_notifier.send_attendance_report(
+                report,
+                lecture_name=lecture_title,
+                include_student_emails=email_cfg.get("notify_students_absent")
+                or email_cfg.get("notify_students_late"),
+            )
+
         summary = {
-            "lecture_id": self.active_lecture_id,
+            "lecture_id": lecture_id_done,
             "absent_marked": marked,
             "board": board,
+            "email_sent": email_ok,
+            "email_message": email_msg,
         }
         self.active_lecture_id = None
         self.lecture_start_time = None
+        self.last_lecture_name = None
         self.session_present_ids = set()
-        return True, f"انتهت المحاضرة — غياب مسجّل: {marked}", summary
+        msg = f"انتهت المحاضرة — غياب: {marked}"
+        if email_cfg.get("enabled"):
+            msg += f" | بريد: {email_msg}"
+        return True, msg, summary
+
+    def send_email_report(
+        self,
+        date_str: Optional[str] = None,
+        include_students: bool = False,
+    ) -> Tuple[bool, str]:
+        report = self.export_absence_report(date_str)
+        return self.email_notifier.send_attendance_report(
+            report,
+            include_student_emails=include_students,
+        )
+
+    def send_test_email(self) -> Tuple[bool, str]:
+        return self.email_notifier.send_test_email()
+
+    def export_report_pdf(
+        self,
+        date_str: Optional[str] = None,
+        lecture_name: Optional[str] = None,
+        output_path: Optional[Path] = None,
+    ) -> Tuple[bool, str]:
+        report = self.export_absence_report(date_str)
+        lec = lecture_name or self.last_lecture_name
+        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        return export_attendance_report_pdf(report, output_path, lec)
 
     def _compute_late_status(self, now: datetime) -> Tuple[str, int]:
         if not self.lecture_start_time:

@@ -82,6 +82,49 @@ Face-Recognition/
 
 ---
 
+## إشعارات البريد الإلكتروني
+
+### الإعداد (Gmail مثال)
+
+1. من حساب Google: **App Password** (كلمة مرور التطبيق)
+2. انسخ `.env.example` إلى `.env` واملأ:
+   ```
+   SMTP_USERNAME=your@gmail.com
+   SMTP_PASSWORD=xxxx xxxx xxxx xxxx
+   SMTP_FROM=your@gmail.com
+   ```
+3. من الواجهة: **إعدادات البريد** → `enabled` = `true` → أضف مشرفين في `admin_recipients`
+4. **إرسال رسالة تجريبية** للتأكد
+
+### متى يُرسل البريد؟
+
+| الحدث | تلقائي |
+|--------|--------|
+| إنهاء المحاضرة | نعم (إن `notify_on_lecture_end`) |
+| زر **إرسال إيميل** | تقرير يدوي لليوم |
+
+التقرير يتضمن: حاضر / متأخر / غائب / معذور + قائمة الأسماء.
+
+### إيميل الطالب (اختياري)
+
+عند التسجيل أدخل **البريد** للطالب. فعّل في الإعدادات:
+- `notify_students_absent` — إيميل للغائبين
+- `notify_students_late` — إيميل للمتأخرين
+
+### تصدير PDF
+
+- من الواجهة: **تصدير PDF** (حفظ سريع في `data/reports/`) أو من نافذة **تقرير غياب** → اختيار مكان الحفظ
+- من الويب: `GET /api/attendance/report/pdf?date=2026-05-21`
+- يتطلب: `pip install reportlab`
+
+### API
+
+- `POST /api/email/test` — رسالة تجريبية
+- `POST /api/email/report` — `{"date":"2026-05-21","include_students":false}`
+- `GET /api/email/config` — الإعدادات (بدون كلمة المرور)
+
+---
+
 ## التشغيل
 
 ### 1) قاعدة البيانات (مرة واحدة)

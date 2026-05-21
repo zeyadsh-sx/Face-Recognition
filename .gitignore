@@ -4,6 +4,10 @@ __pycache__/
 *$py.class
 *.so
 
+# Secrets
+.env
+config/email_config.json
+
 # Database
 *.db
 *.sqlite
@@ -21,4 +25,5 @@ Thumbs.db
 data/known_faces/**/*
 data/unknown_faces/**/*
 data/attendance_images/**/*
+data/reports/*.pdf
 !data/**/.gitkeep

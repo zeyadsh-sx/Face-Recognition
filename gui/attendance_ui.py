@@ -1,8 +1,9 @@
 """Tkinter dialogs for extended attendance features."""
 from __future__ import annotations
 
+import os
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
 from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
@@ -102,7 +103,10 @@ class AttendanceUI:
             ok, msg, summary = self.service.end_lecture()
             status.config(text=f"{'✓' if ok else '✗'} {msg}")
             if ok:
-                messagebox.showinfo("انتهاء المحاضرة", json_summary(summary))
+                extra = ""
+                if summary.get("email_sent") is not None:
+                    extra = f"\n\nالبريد: {summary.get('email_message', '')}"
+                messagebox.showinfo("انتهاء المحاضرة", json_summary(summary) + extra)
 
         ttk.Button(f, text="بدء المحاضرة", command=start).pack(fill=tk.X, pady=2)
         ttk.Button(f, text="إنهاء + تسجيل الغياب", command=end).pack(fill=tk.X, pady=2)
@@ -133,6 +137,7 @@ class AttendanceUI:
             return
         code = simpledialog.askstring("رقم جامعي", "اختياري:") or ""
         section = simpledialog.askstring("شعبة", "اختياري:") or ""
+        email = simpledialog.askstring("البريد الإلكتروني", "اختياري:") or ""
 
         encoding = None
         folder = UNKNOWN_FACES_DIR / temp_id
@@ -148,7 +153,7 @@ class AttendanceUI:
                     continue
 
         sid = self.db.promote_unknown_temp_to_student(
-            temp_id, name, encoding, student_code=code, section=section
+            temp_id, name, encoding, student_code=code, section=section, email=email or None
         )
         if sid:
             messagebox.showinfo("تم", f"تم تسجيل {name} (ID: {sid})")
@@ -196,6 +201,7 @@ class AttendanceUI:
             ("الشعبة", "section"),
             ("السنة", "year"),
             ("المجموعة", "group"),
+            ("البريد الإلكتروني", "email"),
         ]:
             ttk.Label(f, text=label).grid(row=len(entries), column=0, sticky=tk.W, pady=2)
             e = ttk.Entry(f, width=30)
@@ -218,6 +224,7 @@ class AttendanceUI:
                 section=entries["section"].get().strip() or None,
                 year_level=entries["year"].get().strip() or None,
                 group_name=entries["group"].get().strip() or None,
+                email=entries["email"].get().strip() or None,
             )
             if sid:
                 messagebox.showinfo("تم", f"مسجّل: {name}")
@@ -266,14 +273,131 @@ class AttendanceUI:
         report = self.service.export_absence_report()
         win = tk.Toplevel(self.root)
         win.title(f"تقرير {report['date']}")
+        win.geometry("560x420")
         text = tk.Text(win, wrap=tk.WORD)
-        text.pack(fill=tk.BOTH, expand=True)
+        text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        t = report["totals"]
+        text.insert(tk.END, f"ملخص: حاضر {t.get('present')} | متأخر {t.get('late')} | غائب {t.get('absent')}\n\n")
         text.insert(tk.END, f"غائبون ({len(report['absent_list'])}):\n")
         for s in report["absent_list"]:
             text.insert(tk.END, f"  - {s['name']} ({s.get('student_code','')})\n")
         text.insert(tk.END, f"\nمتأخرون ({len(report['late_list'])}):\n")
         for s in report["late_list"]:
             text.insert(tk.END, f"  - {s['name']}\n")
+
+        btn_row = ttk.Frame(win)
+        btn_row.pack(pady=6)
+
+        def save_pdf():
+            path = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF", "*.pdf")],
+                initialfile=f"attendance_{report['date']}.pdf",
+            )
+            if not path:
+                return
+            ok, result = self.service.export_report_pdf(
+                report["date"], output_path=Path(path)
+            )
+            if ok:
+                messagebox.showinfo("PDF", f"تم الحفظ:\n{result}")
+                if messagebox.askyesno("فتح", "فتح الملف الآن؟"):
+                    os.startfile(result)
+            else:
+                messagebox.showerror("PDF", result)
+
+        ttk.Button(btn_row, text="تصدير PDF", command=save_pdf).pack(side=tk.LEFT, padx=6)
+        ttk.Button(btn_row, text="PDF سريع (data/reports)", command=self._quick_export_pdf).pack(
+            side=tk.LEFT, padx=6
+        )
+
+    def _quick_export_pdf(self) -> None:
+        ok, result = self.service.export_report_pdf()
+        if ok:
+            messagebox.showinfo("PDF", f"تم الحفظ:\n{result}")
+            if messagebox.askyesno("فتح", "فتح الملف؟"):
+                os.startfile(result)
+        else:
+            messagebox.showerror("PDF", result)
+
+    def open_email_settings(self) -> None:
+        from core.email_service import load_email_config, save_email_config, ensure_email_config_template
+
+        ensure_email_config_template()
+        cfg = load_email_config()
+        win = tk.Toplevel(self.root)
+        win.title("إعدادات البريد الإلكتروني")
+        win.geometry("480x520")
+        f = ttk.Frame(win, padding=10)
+        f.pack(fill=tk.BOTH, expand=True)
+
+        fields = {}
+        rows = [
+            ("تفعيل البريد (true/false)", "enabled", str(cfg.get("enabled", False)).lower()),
+            ("SMTP Host", "smtp_host", cfg.get("smtp_host", "")),
+            ("SMTP Port", "smtp_port", str(cfg.get("smtp_port", 587))),
+            ("TLS (true/false)", "use_tls", str(cfg.get("use_tls", True)).lower()),
+            ("اسم المستخدم", "username", cfg.get("username", "")),
+            ("كلمة المرور (أو SMTP_PASSWORD في .env)", "password", "********" if cfg.get("password") else ""),
+            ("البريد المرسل", "from_address", cfg.get("from_address", "")),
+            ("اسم المرسل", "from_name", cfg.get("from_name", "")),
+            ("مشرفون (فاصلة بينهم)", "admin_recipients", ",".join(cfg.get("admin_recipients", []))),
+            ("إرسال عند إنهاء المحاضرة", "notify_on_lecture_end", str(cfg.get("notify_on_lecture_end", True)).lower()),
+            ("إبلاغ الطلاب الغائبين", "notify_students_absent", str(cfg.get("notify_students_absent", False)).lower()),
+            ("إبلاغ الطلاب المتأخرين", "notify_students_late", str(cfg.get("notify_students_late", False)).lower()),
+        ]
+        for label, key, val in rows:
+            ttk.Label(f, text=label).pack(anchor=tk.W)
+            e = ttk.Entry(f, width=50)
+            e.insert(0, val)
+            e.pack(fill=tk.X, pady=2)
+            fields[key] = e
+
+        def save():
+            new_cfg = {
+                "enabled": fields["enabled"].get().strip().lower() in ("true", "1", "yes"),
+                "smtp_host": fields["smtp_host"].get().strip(),
+                "smtp_port": int(fields["smtp_port"].get().strip() or 587),
+                "use_tls": fields["use_tls"].get().strip().lower() in ("true", "1", "yes"),
+                "username": fields["username"].get().strip(),
+                "password": fields["password"].get().strip(),
+                "from_address": fields["from_address"].get().strip(),
+                "from_name": fields["from_name"].get().strip(),
+                "admin_recipients": [
+                    x.strip() for x in fields["admin_recipients"].get().split(",") if x.strip()
+                ],
+                "notify_on_lecture_end": fields["notify_on_lecture_end"].get().strip().lower() in ("true", "1", "yes"),
+                "notify_students_absent": fields["notify_students_absent"].get().strip().lower() in ("true", "1", "yes"),
+                "notify_students_late": fields["notify_students_late"].get().strip().lower() in ("true", "1", "yes"),
+            }
+            if save_email_config(new_cfg):
+                self.service.email_notifier.reload_config()
+                messagebox.showinfo("تم", "تم حفظ إعدادات البريد")
+            else:
+                messagebox.showerror("خطأ", "فشل الحفظ")
+
+        def test():
+            ok, msg = self.service.send_test_email()
+            messagebox.showinfo("اختبار", msg if ok else f"فشل: {msg}")
+
+        ttk.Button(f, text="حفظ", command=save).pack(fill=tk.X, pady=4)
+        ttk.Button(f, text="إرسال رسالة تجريبية", command=test).pack(fill=tk.X, pady=4)
+        ttk.Label(
+            f,
+            text="Gmail: فعّل App Password من حساب Google\nأو ضع SMTP_PASSWORD في ملف .env",
+            foreground="gray",
+        ).pack(pady=8)
+
+    def send_email_report_dialog(self) -> None:
+        include = messagebox.askyesno(
+            "إرسال بريد",
+            "هل تُرسل نسخة للطلاب (الغائب/المتأخر) إن وُجد بريدهم؟",
+        )
+        ok, msg = self.service.send_email_report(include_students=include)
+        if ok:
+            messagebox.showinfo("بريد", msg)
+        else:
+            messagebox.showerror("بريد", msg)
 
 
 def json_summary(summary: dict) -> str:

@@ -1,6 +1,8 @@
 """Flask API routes for attendance v2."""
 from datetime import date
-from flask import jsonify, request
+from pathlib import Path
+
+from flask import jsonify, request, send_file
 
 from core.attendance_service import AttendanceService
 
@@ -17,6 +19,20 @@ def register_attendance_routes(app, db):
     def api_absence_report():
         d = request.args.get("date") or date.today().isoformat()
         return jsonify(service.export_absence_report(d))
+
+    @app.route("/api/attendance/report/pdf", methods=["GET"])
+    def api_attendance_report_pdf():
+        d = request.args.get("date") or date.today().isoformat()
+        lecture = request.args.get("lecture_name")
+        ok, result = service.export_report_pdf(d, lecture_name=lecture)
+        if not ok:
+            return jsonify({"success": False, "message": result}), 500
+        return send_file(
+            Path(result),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=Path(result).name,
+        )
 
     @app.route("/api/lecture/active", methods=["GET"])
     def api_active_lecture():
@@ -76,3 +92,24 @@ def register_attendance_routes(app, db):
     def api_students_list():
         section = request.args.get("section")
         return jsonify(db.get_students_filtered(section))
+
+    @app.route("/api/email/config", methods=["GET"])
+    def api_email_config():
+        from core.email_service import load_email_config
+        cfg = load_email_config()
+        safe = {k: v for k, v in cfg.items() if k != "password"}
+        safe["password_set"] = bool(cfg.get("password"))
+        return jsonify(safe)
+
+    @app.route("/api/email/test", methods=["POST"])
+    def api_email_test():
+        ok, msg = service.send_test_email()
+        return jsonify({"success": ok, "message": msg})
+
+    @app.route("/api/email/report", methods=["POST"])
+    def api_email_report():
+        data = request.get_json(silent=True) or {}
+        d = data.get("date") or date.today().isoformat()
+        include = bool(data.get("include_students", False))
+        ok, msg = service.send_email_report(d, include_students=include)
+        return jsonify({"success": ok, "message": msg})
