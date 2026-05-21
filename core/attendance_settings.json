@@ -1,0 +1,7 @@
+{
+  "late_threshold_minutes": 15,
+  "require_real_face": true,
+  "require_mask": false,
+  "session_grace_minutes": 5,
+  "default_lecture_duration_minutes": 120
+}

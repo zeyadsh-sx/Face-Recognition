@@ -46,6 +46,14 @@ except Exception as e:
     print(f"❌ MySQL Dashboard connection failed: {e}")
     db = None
 
+if db:
+    try:
+        from web.attendance_routes import register_attendance_routes
+        register_attendance_routes(app, db)
+        print("✅ Attendance v2 API routes registered")
+    except Exception as route_err:
+        print(f"⚠️ Attendance routes: {route_err}")
+
 # export_service = ExportService()
 
 @app.route('/')

@@ -6,7 +6,10 @@ from datetime import datetime, date, timedelta
 import os
 from typing import Optional, List, Dict, Any
 
-class MySQLAttendanceDatabase:
+from core.db_attendance_v2 import AttendanceDBExtensions
+
+
+class MySQLAttendanceDatabase(AttendanceDBExtensions):
     """MySQL database implementation for advanced attendance system"""
     
     def __init__(self, host='localhost', database='attendance_system', 
@@ -57,6 +60,7 @@ class MySQLAttendanceDatabase:
             self._ensure_lecture_attendance_schema(cursor)
             self._create_attendance_alerts_table(cursor)
             self._create_emotion_analytics_table(cursor)
+            self.ensure_v2_schema()
             
             conn.commit()
             cursor.close()

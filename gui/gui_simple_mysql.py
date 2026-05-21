@@ -40,13 +40,14 @@ if str(ROOT) not in sys.path:
 
 from core.database_core_mysql import MySQLAttendanceDatabase
 from core.features_ai_advanced import (
-    AntiSpoofing,
     EmotionDetector,
     UnknownFaceAlert,
     AdvancedAttendanceReporter,
 )
 from core.face_capture_manager import FaceCaptureManager
 from core.paths import ensure_data_dirs
+from core.attendance_service import AttendanceService
+from gui.attendance_ui import AttendanceUI
 
 class SimpleMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -72,15 +73,19 @@ class SimpleMySQLAttendanceGUI:
         ensure_data_dirs()
         self.face_capture = FaceCaptureManager(save_cooldown=3.0)
 
-        self.anti_spoofing = AntiSpoofing()
         self.emotion_detector = EmotionDetector()
         self.unknown_face_alert = UnknownFaceAlert(self.db)
         self.advanced_reporter = AdvancedAttendanceReporter(self.db)
-        
-        # Setup GUI
+        self.attendance_service = AttendanceService(self.db)
         self.setup_simple_gui()
-        
-        # Load data
+        self.attendance_ui = AttendanceUI(
+            self.root,
+            self.db,
+            self.attendance_service,
+            on_students_changed=self.load_known_faces,
+        )
+        self._setup_extended_buttons()
+
         self.load_known_faces()
         self.load_attendance_data()
     
@@ -104,7 +109,8 @@ class SimpleMySQLAttendanceGUI:
         """Setup simple GUI without complex geometry"""
         try:
             self.root = tk.Tk()
-            self.root.title("Simple MySQL Attendance System")
+            self.root.title("نظام حضور وغياب — التعرف على الوجه")
+            self.root.geometry("900x700")
             # Don't set complex geometry that might cause issues
             self.root.configure(bg='#f0f0f0')
         except Exception as e:
@@ -116,42 +122,26 @@ class SimpleMySQLAttendanceGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Title
-        title_label = ttk.Label(main_frame, text="Simple MySQL Face Recognition", 
-                                font=('Arial', 16, 'bold'))
-        title_label.pack(pady=10)
-        
-        # Control buttons
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(pady=20)
-        
-        # Start Camera button
-        self.start_btn = ttk.Button(button_frame, text="Start Camera", 
-                                    command=self.start_camera)
-        self.start_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Stop Camera button
-        self.stop_btn = ttk.Button(button_frame, text="Stop Camera", 
-                                   command=self.stop_camera, state='disabled')
-        self.stop_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Flip Camera button
-        self.flip_btn = ttk.Button(button_frame, text="Flip Camera", 
-                                 command=self.toggle_flip_camera)
-        self.flip_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Register Student button
-        self.register_btn = ttk.Button(button_frame, text="Register Student", 
-                                     command=self.register_student_simple)
-        self.register_btn.pack(side=tk.LEFT, padx=5)
-        
-        if not FACE_RECOGNITION_AVAILABLE:
-            self.register_btn.config(state='normal')  # Allow registration even without face recognition
-        
-        # View Attendance button
-        self.attendance_btn = ttk.Button(button_frame, text="View Attendance", 
-                                     command=self.show_attendance)
-        self.attendance_btn.pack(side=tk.LEFT, padx=5)
-        
+        title_label = ttk.Label(
+            main_frame,
+            text="نظام حضور وغياب الطلاب",
+            font=('Arial', 16, 'bold'),
+        )
+        title_label.pack(pady=8)
+
+        row1 = ttk.Frame(main_frame)
+        row1.pack(pady=6)
+        self.start_btn = ttk.Button(row1, text="تشغيل الكاميرا", command=self.start_camera)
+        self.start_btn.pack(side=tk.LEFT, padx=4)
+        self.stop_btn = ttk.Button(row1, text="إيقاف", command=self.stop_camera, state='disabled')
+        self.stop_btn.pack(side=tk.LEFT, padx=4)
+        self.flip_btn = ttk.Button(row1, text="عكس الكاميرا", command=self.toggle_flip_camera)
+        self.flip_btn.pack(side=tk.LEFT, padx=4)
+        ttk.Button(row1, text="تسجيل طالب", command=self.register_student_simple).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row1, text="تسجيل (بيانات كاملة)", command=self._register_full).pack(side=tk.LEFT, padx=4)
+
+        self.main_frame = main_frame
+
         if not FACE_RECOGNITION_AVAILABLE:
             self.status_label = ttk.Label(main_frame, text="Face recognition unavailable; basic registration enabled.", 
                                         font=('Arial', 12), foreground='orange')
@@ -167,11 +157,46 @@ class SimpleMySQLAttendanceGUI:
         # Image preview for registration
         self.image_label = ttk.Label(main_frame, text="Selected student image will appear here", anchor='center')
         self.image_label.pack(pady=10, fill=tk.BOTH, expand=True)
-    
+
+    def _setup_extended_buttons(self):
+        row2 = ttk.Frame(self.main_frame)
+        row2.pack(pady=6)
+        ttk.Button(row2, text="بدء/إنهاء محاضرة", command=self.attendance_ui.open_lecture_session).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="لوحة حية", command=self.attendance_ui.open_live_board).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="تحويل temp → طالب", command=self._promote_unknown).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="تعديل يدوي", command=self.attendance_ui.open_manual_edit).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="جدول الحصص", command=self.attendance_ui.open_schedule_manager).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="تقرير غياب", command=self.attendance_ui.export_report_dialog).pack(side=tk.LEFT, padx=4)
+        ttk.Button(row2, text="عرض الحضور", command=self.show_attendance).pack(side=tk.LEFT, padx=4)
+
+    def _promote_unknown(self):
+        self.attendance_ui.open_promote_unknown(self.face_capture, self.load_known_faces)
+
+    def _register_full(self):
+        self.attendance_ui.open_register_full(self._capture_for_registration)
+
+    def _capture_for_registration(self, name: str):
+        if not self.camera_running or not self.video_capture:
+            messagebox.showerror("خطأ", "شغّل الكاميرا أولاً")
+            return None, None, None
+        ret, frame = self.video_capture.read()
+        if not ret:
+            return None, None, None
+        if self.flip_camera:
+            frame = cv2.flip(frame, 1)
+        path, _ = self.face_capture.register_manual(name, frame, is_known=True)
+        enc = None
+        if FACE_RECOGNITION_AVAILABLE:
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            locs = face_recognition.face_locations(rgb)
+            if locs:
+                enc = face_recognition.face_encodings(rgb, locs)[0]
+        return frame, enc, path
+
     def load_known_faces(self):
         """Load known face encodings from database"""
         try:
-            students = self.db.get_all_students()
+            students = self.db.get_all_students_v2() if hasattr(self.db, "get_all_students_v2") else self.db.get_all_students()
             known_face_encodings = []
             known_face_names = []
             
@@ -193,14 +218,18 @@ class SimpleMySQLAttendanceGUI:
         """Load today's attendance from database"""
         try:
             today = date.today().isoformat()
-            attendance_records = self.db.get_attendance_with_emotions(today)
+            if hasattr(self.db, "get_attendance_with_emotions_v2"):
+                attendance_records = self.db.get_attendance_with_emotions_v2(today)
+            else:
+                attendance_records = self.db.get_attendance_with_emotions(today)
             
             self.today_attendance = {}
             for record in attendance_records:
                 self.today_attendance[record['name']] = {
-                    'time': record['time'],
+                    'time': str(record.get('check_in_time') or record.get('time', '')),
                     'emotion': record.get('emotion', 'N/A'),
-                    'is_real_face': record.get('is_real_face', False)
+                    'status': record.get('attendance_status', 'present'),
+                    'is_real_face': record.get('is_real_face', False),
                 }
             
             print(f"Loaded {len(attendance_records)} attendance records for today")
@@ -309,23 +338,39 @@ class SimpleMySQLAttendanceGUI:
                         else:
                             emotion = 'neutral'
 
-                        self.face_capture.capture_known(known_name, face_crop if face_crop.size else frame)
-                        self.face_capture.capture_attendance(known_name, face_crop if face_crop.size else frame)
-                        self.mark_attendance_simple(known_name, emotion)
-
-                        ascii_emojis = {
-                            'happy': ':)',
-                            'sad': ':(',
-                            'angry': '>:(',
-                            'surprise': ':O',
-                            'fear': 'D:',
-                            'disgust': 'x(',
-                            'neutral': ':|',
-                        }
-                        emoji = ascii_emojis.get(emotion, '')
-                        display_text = f"{known_name} {emoji}"
-                        color = (0, 255, 0)
-                        text_color = (0, 0, 0)
+                        img_path = self.face_capture.capture_known(
+                            known_name, face_crop if face_crop.size else frame
+                        )
+                        self.face_capture.capture_attendance(
+                            known_name, face_crop if face_crop.size else frame
+                        )
+                        ok, msg, info = self.attendance_service.process_face_sighting(
+                            known_name,
+                            face_crop if face_crop.size else frame,
+                            frame,
+                            emotion=emotion,
+                            image_path=img_path,
+                        )
+                        if ok:
+                            self._update_today_cache(known_name, info.get("status", "present"), emotion)
+                            status_ar = {"present": "حاضر", "late": "متأخر"}.get(
+                                info.get("status", "present"), "حاضر"
+                            )
+                            display_text = f"{known_name} [{status_ar}]"
+                            color = (0, 255, 0) if info.get("status") != "late" else (0, 200, 255)
+                            text_color = (0, 0, 0)
+                        elif msg == "spoofing_rejected":
+                            display_text = "تحذير: وجه وهمي"
+                            color = (0, 0, 255)
+                            text_color = (255, 255, 255)
+                        elif msg == "mask_required":
+                            display_text = f"{known_name} [كمامة]"
+                            color = (0, 0, 255)
+                            text_color = (255, 255, 255)
+                        else:
+                            display_text = f"{known_name} [؟]"
+                            color = (128, 128, 128)
+                            text_color = (255, 255, 255)
                     else:
                         temp_id, is_new_unknown = self.face_capture.match_or_register_unknown(
                             face_encoding
@@ -385,37 +430,14 @@ class SimpleMySQLAttendanceGUI:
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     
-    def mark_attendance_simple(self, name, emotion='neutral'):
-        """Mark attendance in database"""
-        try:
-            student = self.db.get_student_by_name(name)
-            if not student:
-                print(f"Error marking attendance: student '{name}' not found")
-                return
+    def _update_today_cache(self, name: str, status: str, emotion: str) -> None:
+        self.today_attendance[name] = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "emotion": emotion,
+            "status": status,
+            "is_real_face": True,
+        }
 
-            now = datetime.now()
-            date_str = now.date().isoformat()
-            time_str = now.time().strftime("%H:%M:%S")
-
-            success, message = self.db.mark_attendance_advanced(
-                student_id=student['id'],
-                date_str=date_str,
-                time_str=time_str,
-                emotion=emotion,
-                is_real_face=True
-            )
-
-            if success:
-                self.today_attendance[name] = {
-                    'time': time_str,
-                    'emotion': emotion,
-                    'is_real_face': True
-                }
-            else:
-                print(f"Error marking attendance: {message}")
-
-        except Exception as e:
-            print(f"Error marking attendance: {e}")
     
     def register_student_simple(self):
         """Simple student registration from camera"""
@@ -473,7 +495,11 @@ class SimpleMySQLAttendanceGUI:
                 messagebox.showinfo("Info", "Face recognition not available. Registering student without face data.")
             
             # Add to database
-            student_id = self.db.add_student(name, face_encoding, image_path)
+            student_id = self.db.add_student_with_profile(
+                name, face_encoding, image_path
+            ) if hasattr(self.db, "add_student_with_profile") else self.db.add_student(
+                name, face_encoding, image_path
+            )
             
             if student_id:
                 messagebox.showinfo("Success", f"Student {name} registered successfully!")
@@ -506,12 +532,13 @@ class SimpleMySQLAttendanceGUI:
             text_widget.insert(tk.END, f"Today's Attendance ({date.today().isoformat()})\n")
             text_widget.insert(tk.END, "=" * 40 + "\n\n")
             
+            board = self.attendance_service.get_live_board()
+            text_widget.insert(tk.END, f"ملخص: {board['totals']}\n\n")
             if self.today_attendance:
                 for name, info in self.today_attendance.items():
-                    text_widget.insert(tk.END, f"- {name}\n")
+                    text_widget.insert(tk.END, f"- {name} [{info.get('status','')}]\n")
                     text_widget.insert(tk.END, f"   Time: {info['time']}\n")
                     text_widget.insert(tk.END, f"   Emotion: {info['emotion']}\n")
-                    text_widget.insert(tk.END, f"   Real Face: {info['is_real_face']}\n")
                     text_widget.insert(tk.END, "-" * 30 + "\n")
             else:
                 text_widget.insert(tk.END, "No attendance records for today\n")
