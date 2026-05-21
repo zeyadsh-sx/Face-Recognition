@@ -4,19 +4,18 @@ MySQL Dashboard Startup Script for Advanced Face Recognition System
 """
 
 import sys
-import os
+from pathlib import Path
 
-# Add current directory to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "web"))
 
 try:
-    print("🚀 Starting MySQL Dashboard...")
-    print("📊 Connecting to MySQL database...")
-    print("🌐 Dashboard will be available at: http://localhost:5000")
+    print("Starting MySQL Dashboard...")
+    print("Dashboard: http://localhost:5000")
     print("=" * 60)
-    
-    # Import and run the MySQL dashboard
-    from dashboard_final import app
+
+    from web.dashboard_final import app
     
     print("✅ MySQL Dashboard connected successfully!")
     print("🔒 Advanced features enabled: Anti-spoofing, Emotion Detection, Unknown Face Alerts")

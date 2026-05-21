@@ -16,3 +16,9 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Captured face data (keep folder structure locally)
+data/known_faces/**/*
+data/unknown_faces/**/*
+data/attendance_images/**/*
+!data/**/.gitkeep

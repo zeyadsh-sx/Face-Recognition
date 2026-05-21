@@ -8,8 +8,16 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import json
 import os
+import sys
 from datetime import datetime
-from database_core_mysql import MySQLAttendanceDatabase
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.database_core_mysql import MySQLAttendanceDatabase
+from core.paths import SYSTEM_SETTINGS_FILE
 
 
 class SettingsPanel:
@@ -19,8 +27,7 @@ class SettingsPanel:
         self.parent = parent
         self.db = db
 
-        # Settings file
-        self.settings_file = "system_settings.json"
+        self.settings_file = str(SYSTEM_SETTINGS_FILE)
 
         # Default settings
         self.default_settings = {

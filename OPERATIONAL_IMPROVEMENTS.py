@@ -337,7 +337,7 @@ class OperationalManager:
             else:
                 return False, "فشل إضافة أي كاميرا"
                 
-except Exception as e:
+        except Exception as e:
             return False, f"خطأ في إعداد الكاميرات: {str(e)}"
     
     def emergency_backup(self) -> Tuple[bool, str]:

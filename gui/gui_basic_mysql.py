@@ -15,19 +15,23 @@ except ImportError:
 import cv2
 import numpy as np
 import os
-import pickle
-import json
+import sys
+from pathlib import Path
 from datetime import datetime, date
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 from PIL import Image, ImageTk
-import shutil
-import csv
 import threading
 import time
-from database_core_mysql import MySQLAttendanceDatabase
-from settings_panel import SettingsPanel
-from screenshot_capture import ScreenshotCapture
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.database_core_mysql import MySQLAttendanceDatabase
+from core.paths import ensure_data_dirs, KNOWN_FACES_DIR, UNKNOWN_FACES_DIR, ATTENDANCE_IMAGES_DIR
+from gui.settings_panel import SettingsPanel
+from gui.screenshot_capture import ScreenshotCapture
 
 class BasicMySQLAttendanceGUI:
     def __init__(self, db_config=None):
@@ -56,14 +60,10 @@ class BasicMySQLAttendanceGUI:
         self.stats_running = True
         
         # Directories
-        self.known_faces_dir = "known_faces"
-        self.attendance_images_dir = "attendance_images"
-        self.unknown_faces_dir = "unknown_faces"
-        
-        # Create directories
-        os.makedirs(self.known_faces_dir, exist_ok=True)
-        os.makedirs(self.attendance_images_dir, exist_ok=True)
-        os.makedirs(self.unknown_faces_dir, exist_ok=True)
+        ensure_data_dirs()
+        self.known_faces_dir = str(KNOWN_FACES_DIR)
+        self.attendance_images_dir = str(ATTENDANCE_IMAGES_DIR)
+        self.unknown_faces_dir = str(UNKNOWN_FACES_DIR)
         
         # Setup GUI
         self.setup_basic_gui()

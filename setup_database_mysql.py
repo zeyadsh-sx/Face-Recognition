@@ -5,7 +5,12 @@ MySQL Database Setup Script for Advanced Face Recognition Attendance System
 
 import os
 import sys
-from database_core_mysql import MySQLAttendanceDatabase
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+from core.database_core_mysql import MySQLAttendanceDatabase
 
 def print_banner():
     """Print setup banner"""
@@ -93,7 +98,7 @@ MYSQL_DATABASE = "{database}"
 MYSQL_PORT = {port}
 
 # Use this configuration in your application
-from database_core_mysql import MySQLAttendanceDatabase
+from core.database_core_mysql import MySQLAttendanceDatabase
 
 db = MySQLAttendanceDatabase(
     host=MYSQL_HOST,
