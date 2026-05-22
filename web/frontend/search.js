@@ -22,8 +22,8 @@ class SearchFilter {
         const startDateInput = document.getElementById('startDate');
         const endDateInput = document.getElementById('endDate');
         if (startDateInput && endDateInput) {
-            startDateInput.addEventListener('change', () => this.applyFilters());
-            endDateInput.addEventListener('change', () => this.applyFilters());
+            startDateInput.addEventListener('change', () => this.applyFilters(false));
+            endDateInput.addEventListener('change', () => this.applyFilters(false));
         }
 
         // Department filter
@@ -55,14 +55,20 @@ class SearchFilter {
             return;
         }
 
-        fetch(`/api/search?query=${encodeURIComponent(query)}`)
-            .then(response => response.json())
+        fetch(`/api/search?q=${encodeURIComponent(query)}`)
+            .then(async response => {
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Search failed');
+                }
+                return data;
+            })
             .then(data => {
-                this.displaySearchResults(data.results, query);
+                this.displaySearchResults(data.results || [], query);
             })
             .catch(error => {
                 console.error('Search error:', error);
-                document.getElementById('searchResults').innerHTML = '<p class="text-danger">Error performing search</p>';
+                document.getElementById('searchResults').innerHTML = `<p class="text-danger">Error performing search: ${error.message}</p>`;
             });
     }
 
@@ -75,15 +81,23 @@ class SearchFilter {
         }
 
         let html = `<div class="search-results-list">`;
-        results.forEach(student => {
+        results.forEach(item => {
+            const name = item.name || item.student_name || 'Unknown';
+            const subtitle = item.result_type === 'attendance'
+                ? `${item.date || ''} ${item.time || ''}`.trim() || 'Attendance record'
+                : item.department || item.email || item.status || item.notes || 'Student record';
+            const meta = item.result_type === 'attendance'
+                ? (item.emotion ? `Emotion: ${item.emotion}` : 'No emotion data')
+                : '';
+
             html += `
                 <div class="search-result-item">
                     <div class="result-info">
-                        <strong>${student.name}</strong>
-                        <small class="text-secondary d-block">${student.department}</small>
+                        <strong>${name}</strong>
+                        <small class="text-secondary d-block">${subtitle}</small>
+                        ${meta ? `<small class="text-muted d-block">${meta}</small>` : ''}
                     </div>
-                    <small class="text-muted">${student.email}</small>
-                    <button class="btn btn-sm btn-outline-primary" onclick="searchFilter.searchByStudent('${student.name}')">
+                    <button class="btn btn-sm btn-outline-primary" onclick="searchFilter.searchByStudent('${name.replace("'", "\\'")}')">
                         View Attendance
                     </button>
                 </div>
@@ -98,20 +112,15 @@ class SearchFilter {
         this.applyFilters();
     }
 
-    applyFilters() {
+    applyFilters(showAlert = true) {
         const startDate = document.getElementById('startDate').value;
         const endDate = document.getElementById('endDate').value;
         const department = document.getElementById('departmentFilter').value;
         const studentName = document.getElementById('studentNameFilter').value;
 
-        if (!startDate || !endDate) {
-            alert('Please select both start and end dates');
-            return;
-        }
-
         const params = new URLSearchParams({
-            start_date: startDate,
-            end_date: endDate,
+            start_date: startDate || '',
+            end_date: endDate || '',
             department: department || '',
             student_name: studentName || ''
         });

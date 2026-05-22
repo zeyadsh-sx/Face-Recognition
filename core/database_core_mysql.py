@@ -269,7 +269,18 @@ class MySQLAttendanceDatabase(AttendanceDBExtensions):
                 cursor.execute("ALTER TABLE lecture_attendance ADD COLUMN mask_violation BOOLEAN DEFAULT FALSE AFTER mask_confidence")
             cursor.execute("SHOW COLUMNS FROM lecture_attendance LIKE 'camera_id'")
             if cursor.fetchone():
-                cursor.execute("ALTER TABLE lecture_attendance ADD INDEX idx_camera_id (camera_id)")
+                # Only add the index if it does not already exist
+                cursor.execute("""
+                    SELECT COUNT(*)
+                    FROM information_schema.statistics
+                    WHERE table_schema = DATABASE()
+                      AND table_name = 'lecture_attendance'
+                      AND index_name = 'idx_camera_id'
+                """)
+                index_exists = cursor.fetchone()[0] > 0
+                if not index_exists:
+                    cursor.execute("ALTER TABLE lecture_attendance ADD INDEX idx_camera_id (camera_id)")
+            
         except Error as e:
             print(f"Error ensuring lecture attendance schema: {e}")
 

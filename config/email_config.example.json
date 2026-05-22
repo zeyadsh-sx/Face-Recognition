@@ -1,0 +1,20 @@
+{
+  "enabled": false,
+  "smtp_host": "smtp.gmail.com",
+  "smtp_port": 587,
+  "use_tls": true,
+  "username": "",
+  "password": "",
+  "from_address": "",
+  "from_name": "نظام الحضور والغياب",
+  "admin_recipients": [],
+  "notify_on_lecture_end": true,
+  "notify_on_daily_report": true,
+  "notify_students_absent": false,
+  "notify_students_late": false,
+  "subject_prefix": "[حضور]",
+  "_help": {
+    "gmail": "smtp.gmail.com:587, use App Password",
+    "env": "Set SMTP_PASSWORD in .env instead of saving password in JSON"
+  }
+}

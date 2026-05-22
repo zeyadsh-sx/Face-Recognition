@@ -61,6 +61,15 @@ def load_email_config() -> Dict:
 def save_email_config(config: Dict) -> bool:
     ensure_email_config_template()
     try:
+        # Ensure CONFIG_DIR exists and handle stray files that block directory creation
+        if CONFIG_DIR.exists() and not CONFIG_DIR.is_dir():
+            backup = CONFIG_DIR.with_name(CONFIG_DIR.name + '.bak')
+            i = 1
+            while backup.exists():
+                backup = CONFIG_DIR.with_name(f"{CONFIG_DIR.name}.bak{i}")
+                i += 1
+            CONFIG_DIR.rename(backup)
+            print(f"Warning: existing file '{CONFIG_DIR}' renamed to '{backup}' to create directory.")
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         to_save = {**load_email_config(), **config}
         if to_save.get("password") in ("", "********"):
@@ -74,6 +83,15 @@ def save_email_config(config: Dict) -> bool:
 
 
 def ensure_email_config_template() -> None:
+    # Ensure CONFIG_DIR exists and handle stray files that block directory creation
+    if CONFIG_DIR.exists() and not CONFIG_DIR.is_dir():
+        backup = CONFIG_DIR.with_name(CONFIG_DIR.name + '.bak')
+        i = 1
+        while backup.exists():
+            backup = CONFIG_DIR.with_name(f"{CONFIG_DIR.name}.bak{i}")
+            i += 1
+        CONFIG_DIR.rename(backup)
+        print(f"Warning: existing file '{CONFIG_DIR}' renamed to '{backup}' to create directory.")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not EMAIL_CONFIG_EXAMPLE.exists():
         example = {

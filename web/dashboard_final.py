@@ -6,7 +6,7 @@ except ImportError:
     FLASGGER_AVAILABLE = False
 import json
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 import os
 from pathlib import Path
 from io import StringIO
@@ -119,11 +119,12 @@ def generate_dashboard_html(stats, attendance_records):
     emotion_html = ""
     if stats['emotion_summary']:
         for emotion, count in stats['emotion_summary'].items():
+            emotion_label = str(emotion or 'unknown').capitalize()
             percentage = (count / stats['present_students'] * 100) if stats['present_students'] > 0 else 0
             emotion_html += f"""
             <div class="emotion-card">
                 <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="emotion-name">{emotion.capitalize()}</span>
+                    <span class="emotion-name">{emotion_label}</span>
                     <span class="emotion-count">{count}</span>
                 </div>
                 <div class="progress" style="height: 6px; background: rgba(255,255,255,0.1);">
@@ -137,19 +138,23 @@ def generate_dashboard_html(stats, attendance_records):
     attendance_html = ""
     if attendance_records:
         for record in attendance_records:
-            emotion = record.get('emotion', 'neutral')
+            emotion = record.get('emotion') or 'Neutral'
+            name = record.get('name') or 'Unknown'
+            time_value = record.get('time') or ''
             is_real = record.get('is_real_face', True)
             
             status_class = "status-real" if is_real else "status-fake"
             status_text = "Real" if is_real else "Spoof"
             
+            initial = name[0].upper() if name else '?'
+            
             attendance_html += f"""
             <div class="attendance-row">
                 <div class="attendance-info">
-                    <div class="student-avatar">{record['name'][0].upper()}</div>
+                    <div class="student-avatar">{initial}</div>
                     <div class="student-details">
-                        <span class="student-name">{record['name']}</span>
-                        <span class="attendance-time">{record['time']}</span>
+                        <span class="student-name">{name}</span>
+                        <span class="attendance-time">{time_value}</span>
                     </div>
                 </div>
                 <div class="attendance-meta">
@@ -179,24 +184,35 @@ def generate_dashboard_html(stats, attendance_records):
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@400;700&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-light: #f8fafc;
+            --primary-light: #8e51ff;
+            --primary: #7f22fe;
+            --primary-rgb: 127, 34, 254;
+            --primary-dark: #4f39f6;
+            --blue: #155dfc;
+            --blue-light: #2b7fff;
+            --bg-main: #f8fafc;
+            --bg-light: #f6f3f4;
+            --bg-light-rgb: 246, 243, 244;
+            --bg-soft: #ebe6e7;
+            --text-main: #101828;
+            --text-main-rgb: 16, 24, 40;
+            --text-secondary: #6a7282;
+            --text-secondary-rgb: 106, 114, 130;
+            --orange: #ff6900;
+            --yellow: #ffb900;
+            --pink: #ff2056;
+            --red: #e7000b;
             --bg-card: rgba(255, 255, 255, 0.8);
-            --primary: #2563eb;
-            --primary-glow: rgba(37, 99, 235, 0.2);
+            --primary-glow: rgba(127, 34, 254, 0.2);
             --accent: #059669;
-            --text-main: #0f172a;
-            --text-dim: #64748b;
             --glass-border: rgba(255, 255, 255, 0.5);
             --sidebar-bg: #ffffff;
         }}
 
         body {{
-            background-color: var(--bg-light);
-            background-image: 
-                radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.05) 0%, transparent 50%),
-                radial-gradient(circle at 100% 100%, rgba(5, 150, 105, 0.05) 0%, transparent 50%);
+            background-color: var(--bg-main);
             color: var(--text-main);
-            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-family: 'Inter', 'Plus Jakarta Sans', sans-serif;
             min-height: 100vh;
             margin: 0;
             overflow-x: hidden;
@@ -309,7 +325,7 @@ def generate_dashboard_html(stats, attendance_records):
         }}
 
         .stat-label {{
-            color: var(--text-dim);
+            color: var(--text-secondary);
             font-size: 0.875rem;
             font-weight: 600;
             text-transform: uppercase;
@@ -345,7 +361,7 @@ def generate_dashboard_html(stats, attendance_records):
             border: 1px solid #e2e8f0;
         }}
 
-        .emotion-name {{ font-weight: 600; color: var(--text-dim); }}
+        .emotion-name {{ font-weight: 600; color: var(--text-secondary); }}
         .emotion-count {{ font-weight: 800; color: var(--primary); }}
 
         /* Attendance List */
@@ -440,26 +456,219 @@ def generate_dashboard_html(stats, attendance_records):
         .section-title i {{ color: var(--primary); }}
 
         /* Stat Cards Colors */
-        .stat-card.blue {{ border-left: 4px solid #3b82f6; }}
-        .stat-card.blue .stat-icon {{ color: #3b82f6; opacity: 0.15; }}
-        .stat-card.blue .stat-value {{ color: #1e40af; }}
+        .stat-card.blue {{ border-left: 4px solid var(--primary); }}
+        .stat-card.blue .stat-icon {{ color: var(--primary); opacity: 0.15; }}
+        .stat-card.blue .stat-value {{ color: var(--primary); }}
 
-        .stat-card.green {{ border-left: 4px solid #10b981; }}
-        .stat-card.green .stat-icon {{ color: #10b981; opacity: 0.15; }}
-        .stat-card.green .stat-value {{ color: #065f46; }}
+        .stat-card.green {{ border-left: 4px solid var(--accent); }}
+        .stat-card.green .stat-icon {{ color: var(--accent); opacity: 0.15; }}
+        .stat-card.green .stat-value {{ color: var(--accent); }}
 
-        .stat-card.red {{ border-left: 4px solid #ef4444; }}
-        .stat-card.red .stat-icon {{ color: #ef4444; opacity: 0.15; }}
-        .stat-card.red .stat-value {{ color: #991b1b; }}
+        .stat-card.red {{ border-left: 4px solid var(--red); }}
+        .stat-card.red .stat-icon {{ color: var(--red); opacity: 0.15; }}
+        .stat-card.red .stat-value {{ color: var(--red); }}
 
-        .stat-card.orange {{ border-left: 4px solid #f59e0b; }}
-        .stat-card.orange .stat-icon {{ color: #f59e0b; opacity: 0.15; }}
-        .stat-card.orange .stat-value {{ color: #92400e; }}
+        .stat-card.orange {{ border-left: 4px solid var(--orange); }}
+        .stat-card.orange .stat-icon {{ color: var(--orange); opacity: 0.15; }}
+        .stat-card.orange .stat-value {{ color: var(--orange); }}
 
-        /* Charts */
-        .chart-card {{ padding: 2rem; min-height: 400px; }}
+        /* Charts Styling */
+        .chart-section {{
+            box-shadow: 0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a;
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            -webkit-transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            -moz-transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            -ms-transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            -o-transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }}
 
-        /* Search Input Override */
+        .chart-section:hover {{
+            box-shadow: 0 10px 15px -1px #0000001a, 0 4px 6px -1px #0000001a;
+        }}
+
+        .chart-header {{
+            border-bottom: 2px solid rgba(var(--bg-light-rgb), 1);
+        }}
+
+        .chart-header-icon {{
+            width: 2.5rem;
+            height: 2.5rem;
+            background-image: linear-gradient(to bottom right, var(--primary-light), var(--primary));
+            box-shadow: 0 4px 6px -1px rgba(127, 34, 254, 0.25);
+        }}
+
+        .chart-header .chart-subtitle {{
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-left: auto;
+        }}
+
+        .chart-container {{
+            height: 300px;
+        }}
+
+        .btn-refresh-charts {{
+            background: linear-gradient(to right, var(--primary-light), var(--primary));
+            transition: all 0.3s ease;
+        }}
+
+        .btn-refresh-charts:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(127, 34, 254, 0.3);
+        }}
+
+        .chart-loading {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }}
+
+        .spinner {{
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(127, 34, 254, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            -webkit-animation: spin 0.6s linear infinite;
+        }}
+
+        @keyframes spin {{
+            to {{
+                transform: rotate(360deg);
+            }}
+        }}
+
+        /* Search Card Styling */
+        .search-filter-header {{
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+        }}
+
+        .search-filter-icon {{
+            width: 2.75rem;
+            height: 2.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.75rem;
+            background-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }}
+
+        .search-filter-icon svg {{
+            width: 1.25rem;
+            height: 1.25rem;
+            fill: white;
+        }}
+
+        .search-box input {{
+            width: 100%;
+            padding: 0.9rem 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.85rem;
+            box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05);
+            font-size: 0.95rem;
+        }}
+
+        .search-results-list {{
+            background: #f8fafc;
+            border-radius: 1rem;
+            padding: 1rem;
+            max-height: 270px;
+            overflow-y: auto;
+            border: 1px solid #e2e8f0;
+        }}
+
+        .filter-controls {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }}
+
+        .filter-group label {{
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }}
+
+        .filter-group input,
+        .filter-group select {{
+            width: 100%;
+            padding: 0.85rem 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            background: white;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }}
+
+        .filter-group input:focus,
+        .filter-group select:focus {{
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
+        }}
+
+        .filter-buttons,
+        .export-controls {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }}
+
+        .filter-btn,
+        .export-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.85rem 1.25rem;
+            border-radius: 0.85rem;
+            border: none;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }}
+
+        .filter-btn-apply {{
+            background: linear-gradient(to right, var(--primary-light), var(--primary));
+            color: white;
+        }}
+
+        .filter-btn-apply:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(127, 34, 254, 0.4);
+        }}
+
+        .filter-btn-reset {{
+            background: rgba(var(--bg-light-rgb), 1);
+            color: var(--text-main);
+            border: 2px solid var(--text-secondary);
+        }}
+
+        .filter-btn-reset:hover {{
+            background: rgba(var(--bg-light-rgb), 0.8);
+        }}
+
+        .filter-btn:hover,
+        .export-btn:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+        }}
+
+        .export-btn {{
+            background: #ffffff;
+            color: var(--text-main);
+            border: 1px solid #e2e8f0;
+        }}
+
         #searchInput {{
             background: white !important;
             color: var(--text-main) !important;
@@ -597,61 +806,123 @@ def generate_dashboard_html(stats, attendance_records):
                 <!-- Search Pane -->
                 <div class="tab-pane fade" id="search">
                     <div class="glass-panel p-4">
-                        <div class="section-header">
-                            <h2 class="section-title"><i class="bi bi-search"></i> Data Explorer</h2>
-                        </div>
-                        <div class="input-group mb-4">
-                            <input type="text" id="searchInput" class="form-control bg-white text-dark border-secondary border-opacity-25 rounded-start-pill px-4" placeholder="Search by student name...">
-                            <button class="btn btn-primary rounded-end-pill px-4">Search</button>
-                        </div>
-                        <div id="searchResults" class="attendance-list mt-3"></div>
-                        
-                        <hr class="my-5 opacity-10">
-                        
-                        <h4 class="mb-4 fw-bold">Advanced Filters</h4>
-                        <div class="row g-3">
-                            <div class="col-md-3">
-                                <label class="text-dim small mb-2">Start Date</label>
-                                <input type="date" id="startDate" class="form-control bg-white text-dark border-secondary border-opacity-25">
+                        <div class="search-filter-header mb-4">
+                            <div class="search-filter-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="white">
+                                    <path d="M416 208c0 45.9-14.9 88.3-40 122.7l126.6 126.7c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0s208 93.1 208 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144-144 64.5-144 144 64.5 144 144 144z" />
+                                </svg>
                             </div>
-                            <div class="col-md-3">
-                                <label class="text-dim small mb-2">End Date</label>
-                                <input type="date" id="endDate" class="form-control bg-white text-dark border-secondary border-opacity-25">
+                            <div>
+                                <h2 class="mb-1">Advanced Search & Filters</h2>
+                                <p class="text-dim mb-0">Search students and filter attendance records from the dashboard.</p>
                             </div>
-                            <div class="col-md-3">
-                                <label class="text-dim small mb-2">Department</label>
-                                <select id="departmentFilter" class="form-select bg-white text-dark border-secondary border-opacity-25">
-                                    <option value="">All</option>
+                        </div>
+
+                        <div class="search-box mb-4">
+                            <input type="text" id="searchInput" class="form-control" placeholder="Search for students by name..." autocomplete="off">
+                        </div>
+
+                        <div id="searchResults" class="search-results-list"></div>
+
+                        <h5 class="mt-5 mb-3">Filter Attendance Records</h5>
+                        <div class="filter-controls mb-4">
+                            <div class="filter-group">
+                                <label for="startDate">Start Date:</label>
+                                <input type="date" id="startDate" class="form-control">
+                            </div>
+                            <div class="filter-group">
+                                <label for="endDate">End Date:</label>
+                                <input type="date" id="endDate" class="form-control">
+                            </div>
+                            <div class="filter-group">
+                                <label for="departmentFilter">Department:</label>
+                                <select id="departmentFilter" class="form-select">
+                                    <option value="">All Departments</option>
                                     <option value="IT">IT</option>
                                     <option value="Engineering">Engineering</option>
+                                    <option value="Business">Business</option>
+                                    <option value="Science">Science</option>
+                                    <option value="Arts">Arts</option>
                                 </select>
                             </div>
-                            <div class="col-md-3 d-flex align-items-end">
-                                <button class="btn btn-primary w-100 rounded-pill" onclick="searchFilter.applyFilters()">Apply</button>
+                            <div class="filter-group">
+                                <label for="studentNameFilter">Student Name:</label>
+                                <input type="text" id="studentNameFilter" class="form-control" placeholder="Leave empty to include all">
                             </div>
                         </div>
+
+                        <div class="filter-buttons mb-4">
+                            <button class="filter-btn filter-btn-apply" onclick="searchFilter.applyFilters()">
+                                <span>🔍</span>
+                                Apply Filters
+                            </button>
+                            <button class="filter-btn filter-btn-reset" onclick="searchFilter.resetFilters()">
+                                <span>↺</span> Reset
+                            </button>
+                        </div>
+
+                        <div id="filterResults" class="mt-4"></div>
                     </div>
                 </div>
 
                 <!-- Analytics Pane -->
                 <div class="tab-pane fade" id="charts">
-                    <div class="row g-4">
-                        <div class="col-md-6">
-                            <div class="glass-panel chart-card">
-                                <h3 class="h5 fw-bold mb-4">Weekly Trend</h3>
-                                <canvas id="dailyAttendanceChart"></canvas>
+                    <section class="mt-3">
+                        <button class="btn-refresh-charts px-3 py-2 rounded-pill fw-semibold text-white border-0"
+                            onclick="refreshCharts()">
+                            Refresh Charts
+                        </button>
+                    </section>
+
+                    <div class="row g-3 mt-2 mb-3">
+                        <div class="col-12 col-lg-6">
+                            <div class="chart-section bg-white rounded-4 p-3">
+                                <div class="chart-header d-flex gap-2 mb-2 pb-2">
+                                    <div class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="1.25rem" height="1.25rem"><path fill="#fff" d="M120 0c13.3 0 24 10.7 24 24l0 40 160 0 0-40c0-13.3 10.7-24 24-24s24 10.7 24 24l0 40 32 0c35.3 0 64 28.7 64 64l0 288c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 128C0 92.7 28.7 64 64 64l32 0 0-40c0-13.3 10.7-24 24-24s24 10.7 24 24zM384 432c8.8 0 16-7.2 16-16l0-64-88 0 0 80 72 0zm16-128l0-80-88 0 0 80 88 0zm-136 0l0-80-80 0 0 80 80 0zm-128 0l0-80-88 0 0 80 88 0zM48 352l0 64c0 8.8 7.2 16 16 16l72 0 0-80-88 0zm136 0l0 80 80 0 0-80-80 0zM120 112l-56 0c-8.8 0-16 7.2-16 16l0 48 352 0 0-48c0-8.8-7.2-16-16-16l-264 0z"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 class="fw-bold fs-5 text-dark m-0">Daily Attendance</h2>
+                                        <p class="text-secondary fs-14 mb-0">Last 7 Days Trend</p>
+                                    </div>
+                                </div>
+                                <div class="chart-container d-flex justify-content-center align-items-center position-relative">
+                                    <canvas id="dailyAttendanceChart"></canvas>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="glass-panel chart-card">
-                                <h3 class="h5 fw-bold mb-4">Emotion Analytics</h3>
-                                <canvas id="emotionChart"></canvas>
+
+                        <div class="col-12 col-lg-6">
+                            <div class="chart-section bg-white rounded-4 p-3">
+                                <div class="chart-header d-flex gap-2 mb-2 pb-2">
+                                    <div class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1.25rem" height="1.25rem"><path fill="#fff" d="M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64L0 400c0 44.2 35.8 80 80 80l400 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L80 416c-8.8 0-16-7.2-16-16L64 64zm406.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L320 210.7 262.6 153.4c-12.5-12.5-32.8-12.5-45.3 0l-96 96c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l73.4-73.4 57.4 57.4c12.5 12.5 32.8 12.5 45.3 0l128-128z"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 class="fw-bold fs-5 text-dark m-0">Emotion Analytics</h2>
+                                        <p class="text-secondary fs-14 mb-0">Real-time mood tracking</p>
+                                    </div>
+                                </div>
+                                <div class="chart-container d-flex justify-content-center align-items-center position-relative">
+                                    <canvas id="emotionChart"></canvas>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-12">
-                            <div class="glass-panel chart-card">
-                                <h3 class="h5 fw-bold mb-4">Monthly Overview</h3>
-                                <canvas id="monthlyAttendanceChart"></canvas>
+
+                        <div class="col-12">
+                            <div class="chart-section bg-white rounded-4 p-3">
+                                <div class="chart-header d-flex gap-2 mb-2 pb-2">
+                                    <div class="chart-header-icon rounded-3 d-flex justify-content-center align-items-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="1.25rem" height="1.25rem"><path fill="#fff" d="M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64L0 400c0 44.2 35.8 80 80 80l400 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L80 416c-8.8 0-16-7.2-16-16L64 64zm406.6 86.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L320 210.7 262.6 153.4c-12.5-12.5-32.8-12.5-45.3 0l-96 96c-12.5 12.5-12.5 32.8 0 45.3s32.8 12.5 45.3 0l73.4-73.4 57.4 57.4c12.5 12.5 32.8 12.5 45.3 0l128-128z"/></svg>
+                                    </div>
+                                    <div>
+                                        <h2 class="fw-bold fs-5 text-dark m-0">Monthly Overview</h2>
+                                        <p class="text-secondary fs-14 mb-0">This month’s attendance summary</p>
+                                    </div>
+                                </div>
+                                <div class=" d-flex justify-content-center align-items-center position-relative">
+                                    <canvas id="monthlyAttendanceChart"></canvas>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -868,7 +1139,7 @@ def api_search():
         return jsonify({'error': 'Database connection failed'}), 500
     
     try:
-        query = request.args.get('q', '').strip()
+        query = request.args.get('q', request.args.get('query', '')).strip()
         search_type = request.args.get('type', 'all').lower()
         search_date = request.args.get('date')
         
@@ -918,13 +1189,33 @@ def api_search():
             if result_id not in seen_ids:
                 seen_ids.add(result_id)
                 unique_results.append(result)
+
+        def serialize_value(value):
+            if isinstance(value, (datetime, date, time)):
+                return value.isoformat()
+            if isinstance(value, timedelta):
+                return str(value)
+            return value
+
+        def sanitize_result(item):
+            sanitized = {}
+            for key, value in item.items():
+                if isinstance(value, list):
+                    sanitized[key] = [sanitize_result(sub) if isinstance(sub, dict) else serialize_value(sub) for sub in value]
+                elif isinstance(value, dict):
+                    sanitized[key] = sanitize_result(value)
+                else:
+                    sanitized[key] = serialize_value(value)
+            return sanitized
+
+        sanitized_results = [sanitize_result(r) for r in unique_results]
         
         return jsonify({
             'query': query,
             'type': search_type,
             'date': search_date,
-            'results': unique_results,
-            'count': len(unique_results),
+            'results': sanitized_results,
+            'count': len(sanitized_results),
             'timestamp': datetime.now().isoformat()
         })
         

@@ -33,4 +33,15 @@ def ensure_data_dirs() -> None:
         REPORTS_DIR,
         CONFIG_DIR,
     ):
+        # If a non-directory file exists where we expect a directory, rename it safely
+        if path.exists() and not path.is_dir():
+            # create a unique backup name
+            backup = path.with_name(path.name + '.bak')
+            i = 1
+            while backup.exists():
+                backup = path.with_name(f"{path.name}.bak{i}")
+                i += 1
+            path.rename(backup)
+            print(f"Warning: existing file '{path}' renamed to '{backup}' to create directory.")
+
         path.mkdir(parents=True, exist_ok=True)
