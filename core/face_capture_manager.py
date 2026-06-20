@@ -163,11 +163,11 @@ class FaceCaptureManager:
         self,
         name: str,
         frame,
-        is_known_student: bool,
+        is_known: bool,
     ) -> Tuple[str, Path]:
         """Manual registration from GUI dialog."""
         folder_name = self.safe_folder_name(name)
-        if is_known_student:
+        if is_known:
             folder = self.known_dir / folder_name
         else:
             temp_id = self._next_temp_id()

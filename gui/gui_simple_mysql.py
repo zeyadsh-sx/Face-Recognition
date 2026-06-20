@@ -173,7 +173,8 @@ class SimpleMySQLAttendanceGUI:
 
     def _capture_for_registration(self, name: str):
         if not self.camera_running or not self.video_capture:
-            messagebox.showerror("خطأ", "شغّل الكاميرا أولاً")
+            messagebox.showinfo("خطأ", "جاري تشغيل الكاميرا الآن. حاول مرة أخرى بعد ظهور الفيديو.")
+            self.start_camera()
             return None, None, None
         ret, frame = self.video_capture.read()
         if not ret:
@@ -241,18 +242,27 @@ class SimpleMySQLAttendanceGUI:
             return
 
         try:
-            # Try multiple backends for stability on Windows
+            # Try multiple backends and device indices for better camera detection on Windows
             for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF, None]:
-                if backend is not None:
-                    self.video_capture = cv2.VideoCapture(0, backend)
-                else:
-                    self.video_capture = cv2.VideoCapture(0)
-                
-                if self.video_capture.isOpened():
+                for index in range(3):
+                    if backend is not None:
+                        self.video_capture = cv2.VideoCapture(index, backend)
+                    else:
+                        self.video_capture = cv2.VideoCapture(index)
+
+                    if self.video_capture.isOpened():
+                        print(f"Opened camera index {index} with backend {backend}")
+                        break
+                    try:
+                        self.video_capture.release()
+                    except Exception:
+                        pass
+
+                if self.video_capture and self.video_capture.isOpened():
                     break
-                    
-            if not self.video_capture.isOpened():
-                raise Exception("Could not open camera with any backend")
+
+            if not self.video_capture or not self.video_capture.isOpened():
+                raise Exception("Could not open camera with any backend or index")
             
             self.face_capture.clear_session()
             self.camera_running = True
@@ -439,7 +449,11 @@ class SimpleMySQLAttendanceGUI:
         """Simple student registration from camera"""
         try:
             if not self.camera_running or self.video_capture is None:
-                messagebox.showerror("Error", "Please start the camera first to capture the student's face.")
+                self.start_camera()
+                if not self.camera_running or self.video_capture is None:
+                    messagebox.showerror("Error", "Please start the camera first to capture the student's face.")
+                    return
+                messagebox.showinfo("Camera", "Camera started automatically. Please press تسجيل طالب again when the preview appears.")
                 return
                 
             # Ask for student name
@@ -472,6 +486,7 @@ class SimpleMySQLAttendanceGUI:
             self.image_label.image = self.registered_image_tk
 
             face_encoding = None
+            face_locations = []
             if FACE_RECOGNITION_AVAILABLE:
                 # Extract face encoding directly from the captured frame
                 face_locations = face_recognition.face_locations(rgb_frame)
@@ -498,7 +513,44 @@ class SimpleMySQLAttendanceGUI:
             )
             
             if student_id:
-                messagebox.showinfo("Success", f"Student {name} registered successfully!")
+                attendance_ok = False
+                attendance_msg = ""
+                if FACE_RECOGNITION_AVAILABLE and face_locations:
+                    top, right, bottom, left = face_locations[0]
+                    face_crop = frame[
+                        max(0, top):bottom,
+                        max(0, left):right,
+                    ]
+                    ok, msg, _ = self.attendance_service.process_face_sighting(
+                        name,
+                        face_crop if face_crop.size else frame,
+                        frame,
+                        emotion="neutral",
+                        image_path=image_path,
+                    )
+                    attendance_ok = ok
+                    attendance_msg = msg
+                else:
+                    now = datetime.now()
+                    date_str = now.date().isoformat()
+                    time_str = now.time().strftime("%H:%M:%S")
+                    ok, msg = self.db.record_attendance_sighting(
+                        student_id=student_id,
+                        date_str=date_str,
+                        time_str=time_str,
+                        attendance_status="present",
+                        image_path=image_path,
+                        emotion="neutral",
+                        is_real_face=True,
+                    )
+                    attendance_ok = ok
+                    attendance_msg = msg
+
+                if attendance_ok:
+                    self._update_today_cache(name, "present", "neutral")
+                    messagebox.showinfo("Success", f"Student {name} registered and attendance recorded.")
+                else:
+                    messagebox.showwarning("Warning", f"Student {name} registered but attendance was not recorded: {attendance_msg}")
                 self.load_known_faces()
             else:
                 messagebox.showerror("Error", "Failed to register student")
@@ -530,14 +582,22 @@ class SimpleMySQLAttendanceGUI:
             
             board = self.attendance_service.get_live_board()
             text_widget.insert(tk.END, f"ملخص: {board['totals']}\n\n")
-            if self.today_attendance:
-                for name, info in self.today_attendance.items():
-                    text_widget.insert(tk.END, f"- {name} [{info.get('status','')}]\n")
-                    text_widget.insert(tk.END, f"   Time: {info['time']}\n")
-                    text_widget.insert(tk.END, f"   Emotion: {info['emotion']}\n")
-                    text_widget.insert(tk.END, "-" * 30 + "\n")
-            else:
-                text_widget.insert(tk.END, "No attendance records for today\n")
+
+            def insert_section(title, records):
+                text_widget.insert(tk.END, f"{title} ({len(records)})\n")
+                if records:
+                    for record in records:
+                        time_str = record.get('check_in_time') or record.get('time') or '-'
+                        status = record.get('attendance_status') or record.get('status') or title.lower()
+                        text_widget.insert(tk.END, f"- {record.get('name', '-')}: {status} | {time_str}\n")
+                    text_widget.insert(tk.END, "\n")
+                else:
+                    text_widget.insert(tk.END, "- لا يوجد\n\n")
+
+            insert_section('حاضر', board.get('present', []))
+            insert_section('متأخر', board.get('late', []))
+            insert_section('غائب', board.get('absent', []))
+            insert_section('معذور', board.get('excused', []))
             
             # Close button
             close_btn = ttk.Button(attendance_window, text="Close", 

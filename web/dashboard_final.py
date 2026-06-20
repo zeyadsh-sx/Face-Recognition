@@ -1575,6 +1575,82 @@ def convert_report_to_csv(report_data):
     )
 
 
+def export_attendance_records_to_pdf(data, filepath, title='Attendance Report'):
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError:
+        return False, 'ReportLab غير مثبت. ثبّت الحزمة باستخدام: pip install reportlab'
+
+    doc = SimpleDocTemplate(
+        filepath,
+        pagesize=A4,
+        rightMargin=1.5 * cm,
+        leftMargin=1.5 * cm,
+        topMargin=1.5 * cm,
+        bottomMargin=1.5 * cm,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'Title',
+        parent=styles['Heading1'],
+        fontSize=16,
+        alignment=1,
+        spaceAfter=12,
+    )
+    normal_style = ParagraphStyle(
+        'Normal',
+        parent=styles['Normal'],
+        fontSize=11,
+        alignment=0,
+        leading=14,
+    )
+
+    summary = {
+        'records': len(data),
+        'start': data[0].get('date') if data else '',
+        'end': data[-1].get('date') if data else '',
+    }
+
+    elements = [
+        Paragraph(title, title_style),
+        Paragraph(f'سجلات: {summary["records"]}', normal_style),
+        Paragraph(f'نطاق التواريخ: {summary["start"]} - {summary["end"]}', normal_style),
+        Spacer(1, 0.3 * cm),
+    ]
+
+    header = ['#', 'Name', 'Date', 'Time', 'Emotion']
+    rows = [header]
+    for idx, row in enumerate(data, start=1):
+        rows.append([
+            str(idx),
+            str(row.get('name', '-')),
+            str(row.get('date', '-')),
+            str(row.get('time', '-')),
+            str(row.get('emotion', '-')),
+        ])
+
+    table = Table(rows, colWidths=[1.2 * cm, 6.5 * cm, 3 * cm, 2.5 * cm, 3 * cm])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+    ]))
+    elements.append(table)
+
+    try:
+        doc.build(elements)
+        return True, filepath
+    except Exception as e:
+        return False, f'فشل إنشاء PDF: {e}'
+
+
 @app.route('/api/reports/export', methods=['GET'])
 def api_report_export():
     """Export attendance report in CSV, Excel, PDF or JSON."""
@@ -1599,16 +1675,19 @@ def api_report_export():
 
         if export_format == 'csv':
             filename = os.path.join(export_dir, f"{base_name}.csv")
-            success, result = export_service.export_to_csv(data, filename)
+            success, result = False, 'CSV export not implemented in this endpoint'
         elif export_format == 'excel':
             filename = os.path.join(export_dir, f"{base_name}.xlsx")
-            success, result = export_service.export_to_excel(data, filename)
+            success, result = False, 'Excel export not implemented in this endpoint'
         elif export_format == 'pdf':
             filename = os.path.join(export_dir, f"{base_name}.pdf")
-            success, result = export_service.export_to_pdf(data, filename, title=f"Attendance Report {start_date} to {end_date}")
+            success, result = export_attendance_records_to_pdf(data, filename, title=f"Attendance Report {start_date} to {end_date}")
         elif export_format == 'json':
             filename = os.path.join(export_dir, f"{base_name}.json")
-            success, result = export_service.export_to_json(data, filename)
+            with open(filename, 'w', encoding='utf-8') as f:
+                import json as _json
+                _json.dump(data, f, ensure_ascii=False, indent=2)
+            success, result = True, filename
         else:
             return jsonify({'error': 'Invalid export format'}), 400
 
