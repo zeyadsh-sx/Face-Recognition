@@ -301,22 +301,30 @@ class AttendanceDBExtensions:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
-                cursor.execute(
-                    """
+                query = """
                     SELECT a.student_id, a.attendance_status, a.check_in_time, a.check_out_time,
                            a.time, a.emotion, a.late_minutes, s.name, s.student_code, s.section
                     FROM attendance a
                     JOIN students s ON s.id = a.student_id
                     WHERE a.date = %s
-                    """,
-                    (date_str,),
-                )
+                    """
+                params = [date_str]
+                if lecture_id:
+                    query += " AND a.lecture_id = %s"
+                    params.append(lecture_id)
+                cursor.execute(query, tuple(params))
                 records = {r["student_id"]: r for r in cursor.fetchall()}
 
-                cursor.execute(
-                    "SELECT student_id, status, reason FROM daily_absence WHERE date = %s",
-                    (date_str,),
-                )
+                if lecture_id:
+                    cursor.execute(
+                        "SELECT student_id, status, reason FROM daily_absence WHERE date = %s AND lecture_id = %s",
+                        (date_str, lecture_id),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT student_id, status, reason FROM daily_absence WHERE date = %s",
+                        (date_str,),
+                    )
                 absences = {r["student_id"]: r for r in cursor.fetchall()}
         except Error as e:
             print(f"get_attendance_board error: {e}")
@@ -372,11 +380,12 @@ class AttendanceDBExtensions:
         status: str,
         time_str: Optional[str] = None,
         reason: Optional[str] = None,
+        lecture_id: Optional[str] = None,
     ) -> Tuple[bool, str]:
         now_t = time_str or datetime.now().strftime("%H:%M:%S")
         if status in ("present", "late"):
             return self.record_attendance_sighting(
-                student_id, date_str, now_t, attendance_status=status
+                student_id, date_str, now_t, attendance_status=status, lecture_id=lecture_id
             )
         try:
             with self.get_connection() as conn:
@@ -388,11 +397,11 @@ class AttendanceDBExtensions:
                 abs_status = "excused" if status == "excused" else "absent"
                 cursor.execute(
                     """
-                    INSERT INTO daily_absence (student_id, date, status, reason)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE status = VALUES(status), reason = VALUES(reason)
+                    INSERT INTO daily_absence (student_id, date, lecture_id, status, reason)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE status = VALUES(status), reason = VALUES(reason), lecture_id = VALUES(lecture_id)
                     """,
-                    (student_id, date_str, abs_status, reason),
+                    (student_id, date_str, lecture_id, abs_status, reason),
                 )
                 return True, status
         except Error as e:
@@ -411,7 +420,7 @@ class AttendanceDBExtensions:
         for st in students:
             if st["id"] not in present_set:
                 ok, _ = self.set_manual_attendance_status(
-                    st["id"], today, "absent", reason=f"auto_absent_lecture:{lecture_id}"
+                    st["id"], today, "absent", reason=f"auto_absent_lecture:{lecture_id}", lecture_id=lecture_id
                 )
                 if ok:
                     marked += 1

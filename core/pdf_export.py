@@ -76,7 +76,7 @@ def export_attendance_report_pdf(
             TableStyle,
         )
     except ImportError:
-        return False, "ثبّت reportlab: pip install reportlab"
+        return False, "ReportLab غير مثبت. ثبّت الحزمة الصحيحة باستخدام: pip install reportlab"
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     date_str = report.get("date", datetime.now().strftime("%Y-%m-%d"))
@@ -115,17 +115,17 @@ def export_attendance_report_pdf(
         spaceAfter=6,
     )
 
-    title = f"تقرير حضور وغياب — {date_str}"
+    title = f"Attendance Report - {date_str}"
     if lecture_name:
-        title += f"<br/>{lecture_name}"
+        title += f"\n{lecture_name}"
 
     t = report.get("totals", {})
     summary_text = (
-        f"حاضر: {t.get('present', 0)} &nbsp;|&nbsp; "
-        f"متأخر: {t.get('late', 0)} &nbsp;|&nbsp; "
-        f"غائب: {t.get('absent', 0)} &nbsp;|&nbsp; "
-        f"معذور: {t.get('excused', 0)} &nbsp;|&nbsp; "
-        f"إجمالي الطلاب: {t.get('students', 0)}"
+        f"Present: {t.get('present', 0)} | "
+        f"Late: {t.get('late', 0)} | "
+        f"Absent: {t.get('absent', 0)} | "
+        f"Excused: {t.get('excused', 0)} | "
+        f"Total students: {t.get('students', 0)}"
     )
     generated = report.get("generated_at", datetime.now().isoformat())[:19]
 
@@ -143,14 +143,14 @@ def export_attendance_report_pdf(
     elements.append(Paragraph(f"تاريخ التوليد: {generated}", normal_style))
     elements.append(Spacer(1, 0.4 * cm))
 
-    header = ["#", "الاسم", "الرقم", "الشعبة", "الوقت"]
+    header = ["#", "Name", "ID", "Section", "Time"]
     col_widths = [1 * cm, 5.5 * cm, 2.5 * cm, 2.5 * cm, 2.5 * cm]
 
     sections = [
-        ("الغائبون", report.get("absent_list", [])),
-        ("المتأخرون", report.get("late_list", [])),
-        ("الحاضرون", report.get("present_list", [])),
-        ("المعذورون", report.get("excused_list", [])),
+        ("Absent", report.get("absent_list", [])),
+        ("Late", report.get("late_list", [])),
+        ("Present", report.get("present_list", [])),
+        ("Excused", report.get("excused_list", [])),
     ]
 
     table_style = TableStyle([
@@ -170,7 +170,7 @@ def export_attendance_report_pdf(
         elements.append(Paragraph(f"{section_title} ({len(students)})", section_style))
         body = _student_rows(students)
         if not body:
-            body = [["-", "لا يوجد", "-", "-", "-"]]
+            body = [["-", "None", "-", "-", "-"]]
         tbl = Table([header] + body, colWidths=col_widths, repeatRows=1)
         tbl.setStyle(table_style)
         elements.append(tbl)

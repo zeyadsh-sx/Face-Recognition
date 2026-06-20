@@ -18,13 +18,15 @@ def register_attendance_routes(app, db):
     @app.route("/api/attendance/report", methods=["GET"])
     def api_absence_report():
         d = request.args.get("date") or date.today().isoformat()
-        return jsonify(service.export_absence_report(d))
+        lecture_id = request.args.get("lecture_id")
+        return jsonify(service.export_absence_report(d, lecture_id))
 
     @app.route("/api/attendance/report/pdf", methods=["GET"])
     def api_attendance_report_pdf():
         d = request.args.get("date") or date.today().isoformat()
+        lecture_id = request.args.get("lecture_id")
         lecture = request.args.get("lecture_name")
-        ok, result = service.export_report_pdf(d, lecture_name=lecture)
+        ok, result = service.export_report_pdf(d, lecture_id=lecture_id, lecture_name=lecture)
         if not ok:
             return jsonify({"success": False, "message": result}), 500
         return send_file(

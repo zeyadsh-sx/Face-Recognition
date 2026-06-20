@@ -90,9 +90,12 @@ class AttendanceService:
         )
         lecture_id_done = self.active_lecture_id
         lecture_title = self.last_lecture_name or lecture_id_done
+        end_saved = self.db.end_lecture_session(lecture_id_done, emotions_summary={})
+        if not end_saved:
+            return False, "فشل حفظ نهاية المحاضرة", {}
+
         board = self.db.get_attendance_board(date.today().isoformat(), lecture_id_done)
-        report = self.export_absence_report()
-        self.db.end_lecture_session(lecture_id_done, emotions_summary={})
+        report = self.export_absence_report(date.today().isoformat(), lecture_id_done)
 
         email_ok, email_msg = False, "البريد معطّل"
         email_cfg = load_email_config()
@@ -124,8 +127,9 @@ class AttendanceService:
         self,
         date_str: Optional[str] = None,
         include_students: bool = False,
+        lecture_id: Optional[str] = None,
     ) -> Tuple[bool, str]:
-        report = self.export_absence_report(date_str)
+        report = self.export_absence_report(date_str, lecture_id)
         return self.email_notifier.send_attendance_report(
             report,
             include_student_emails=include_students,
@@ -137,10 +141,11 @@ class AttendanceService:
     def export_report_pdf(
         self,
         date_str: Optional[str] = None,
+        lecture_id: Optional[str] = None,
         lecture_name: Optional[str] = None,
         output_path: Optional[Path] = None,
     ) -> Tuple[bool, str]:
-        report = self.export_absence_report(date_str)
+        report = self.export_absence_report(date_str, lecture_id)
         lec = lecture_name or self.last_lecture_name
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         return export_attendance_report_pdf(report, output_path, lec)
@@ -228,9 +233,9 @@ class AttendanceService:
             self.active_lecture_id,
         )
 
-    def export_absence_report(self, date_str: Optional[str] = None) -> Dict:
+    def export_absence_report(self, date_str: Optional[str] = None, lecture_id: Optional[str] = None) -> Dict:
         d = date_str or date.today().isoformat()
-        board = self.db.get_attendance_board(d)
+        board = self.db.get_attendance_board(d, lecture_id)
         return {
             "date": d,
             "generated_at": datetime.now().isoformat(),

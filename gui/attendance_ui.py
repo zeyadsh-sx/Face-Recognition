@@ -1,11 +1,9 @@
 """Tkinter dialogs for extended attendance features."""
 from __future__ import annotations
 
-import os
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog, filedialog
+from tkinter import ttk, messagebox, simpledialog
 from datetime import date, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 try:
@@ -32,47 +30,31 @@ class AttendanceUI:
         self.service = service
         self.on_students_changed = on_students_changed
 
-    def open_live_board(self) -> None:
-        win = tk.Toplevel(self.root)
-        win.title("لوحة الحضور والغياب الحية")
-        win.geometry("720x520")
-        text = tk.Text(win, wrap=tk.WORD, font=("Consolas", 10))
-        text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-
-        def refresh():
-            board = self.service.get_live_board()
-            text.delete("1.0", tk.END)
-            t = board["totals"]
-            text.insert(tk.END, f"التاريخ: {board['date']}\n")
-            if self.service.active_lecture_id:
-                text.insert(tk.END, f"محاضرة نشطة: {self.service.active_lecture_id}\n")
-            text.insert(
-                tk.END,
-                f"حاضر: {t['present']} | متأخر: {t['late']} | غائب: {t['absent']} | معذور: {t['excused']}\n\n",
-            )
-            for label, key in [
-                ("=== حاضر ===", "present"),
-                ("=== متأخر ===", "late"),
-                ("=== غائب ===", "absent"),
-                ("=== معذور ===", "excused"),
-            ]:
-                text.insert(tk.END, f"{label}\n")
-                for s in board[key]:
-                    code = s.get("student_code") or "-"
-                    cin = s.get("check_in_time") or s.get("time") or "-"
-                    text.insert(tk.END, f"  • {s['name']} ({code}) — {cin}\n")
-                text.insert(tk.END, "\n")
-
-        ttk.Button(win, text="تحديث", command=refresh).pack(pady=4)
-        refresh()
-
     def open_lecture_session(self) -> None:
         win = tk.Toplevel(self.root)
         win.title("جلسة محاضرة")
-        win.geometry("400x280")
+        win.geometry("500x400")
         f = ttk.Frame(win, padding=12)
         f.pack(fill=tk.BOTH, expand=True)
+
+        # عرض المحاضرة النشطة فقط إذا بدأتِها من الواجهة الحالية
+        # (لا نعرض محاضرات نشطة موجودة مسبقًا في قاعدة البيانات)
+        active = None
+        if getattr(self.service, 'last_lecture_name', None):
+            # تم بدء محاضرة أثناء هذه الجلسة عبر الواجهة
+            active = self.db.get_active_lecture()
+        if active:
+            ttk.Label(f, text="🟢 محاضرة نشطة:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=5)
+            info_text = (
+                f"الاسم: {active['name']}\nالمادة: {active['course_code']}\n"
+                f"المحاضر: {active['instructor']}\nالشعبة: {active.get('section', '-')}\n"
+                f"الوقت: {str(active['start_time'])[:19]}"
+            )
+            ttk.Label(f, text=info_text, foreground="green").pack(anchor=tk.W, padx=20, pady=5)
+            ttk.Separator(f, orient='horizontal').pack(fill=tk.X, pady=10)
+
         fields = {}
+        ttk.Label(f, text="بيانات محاضرة جديدة:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=5)
         for label, key in [
             ("اسم المحاضرة", "name"),
             ("كود المادة", "code"),
@@ -86,7 +68,7 @@ class AttendanceUI:
             fields[key] = e
         fields["late"].insert(0, str(self.service.lecture_late_threshold))
 
-        status = ttk.Label(f, text="")
+        status = ttk.Label(f, text="", foreground="blue")
         status.pack(pady=8)
 
         def start():
@@ -97,96 +79,120 @@ class AttendanceUI:
                 fields["section"].get().strip() or None,
                 int(fields["late"].get().strip() or 15),
             )
-            status.config(text=f"{'✓' if ok else '✗'} {msg}")
+            if ok:
+                status.config(text=f"✓ تم بدء المحاضرة: {msg}", foreground="green")
+                win.after(1500, lambda: win.destroy())
+            else:
+                status.config(text=f"✗ فشل: {msg}", foreground="red")
 
         def end():
             ok, msg, summary = self.service.end_lecture()
-            status.config(text=f"{'✓' if ok else '✗'} {msg}")
             if ok:
-                extra = ""
+                status.config(text=f"✓ تم إنهاء المحاضرة", foreground="green")
+                totals = summary.get("board", {}).get("totals", {})
+                present = totals.get("present", 0)
+                absent = totals.get("absent", 0)
+                late = totals.get("late", 0)
+                excused = totals.get("excused", 0)
+                extra_lines = []
                 if summary.get("email_sent") is not None:
-                    extra = f"\n\nالبريد: {summary.get('email_message', '')}"
-                messagebox.showinfo("انتهاء المحاضرة", json_summary(summary) + extra)
+                    extra_lines.append(f"بريد: {summary.get('email_message', '')}")
+                details = (
+                    f"تم تسجيل نهاية المحاضرة.\n\n"
+                    f"الحضور: {present}\n"
+                    f"التأخير: {late}\n"
+                    f"الغياب: {absent}\n"
+                    f"معذور: {excused}\n"
+                )
+                if extra_lines:
+                    details += "\n" + "\n".join(extra_lines)
+                messagebox.showinfo("انتهاء المحاضرة", details)
+                win.after(500, lambda: win.destroy())
+            else:
+                status.config(text=f"✗ فشل: {msg}", foreground="red")
 
-        ttk.Button(f, text="بدء المحاضرة", command=start).pack(fill=tk.X, pady=2)
-        ttk.Button(f, text="إنهاء + تسجيل الغياب", command=end).pack(fill=tk.X, pady=2)
-
-    def open_promote_unknown(self, face_capture, load_known_faces) -> None:
-        import os
-        import shutil
-        import pickle
-        from core.paths import UNKNOWN_FACES_DIR
-
-        temps = sorted(
-            [d.name for d in UNKNOWN_FACES_DIR.iterdir() if d.is_dir() and d.name.startswith("temp_")]
-        )
-        if not temps:
-            messagebox.showinfo("مجهول", "لا توجد مجلدات temp في unknown_faces")
-            return
-
-        temp_id = simpledialog.askstring(
-            "تحويل مجهول",
-            f"أدخل رقم المجلد:\n{', '.join(temps[-10:])}",
-            initialvalue=temps[-1],
-        )
-        if not temp_id or temp_id not in temps:
-            return
-
-        name = simpledialog.askstring("اسم الطالب", "الاسم الكامل:")
-        if not name:
-            return
-        code = simpledialog.askstring("رقم جامعي", "اختياري:") or ""
-        section = simpledialog.askstring("شعبة", "اختياري:") or ""
-        email = simpledialog.askstring("البريد الإلكتروني", "اختياري:") or ""
-
-        encoding = None
-        folder = UNKNOWN_FACES_DIR / temp_id
-        if FR_AVAILABLE:
-            for img in folder.glob("*.jpg"):
-                try:
-                    img_arr = face_recognition.load_image_file(str(img))
-                    encs = face_recognition.face_encodings(img_arr)
-                    if encs:
-                        encoding = encs[0]
-                        break
-                except Exception:
-                    continue
-
-        sid = self.db.promote_unknown_temp_to_student(
-            temp_id, name, encoding, student_code=code, section=section, email=email or None
-        )
-        if sid:
-            messagebox.showinfo("تم", f"تم تسجيل {name} (ID: {sid})")
-            load_known_faces()
-            if self.on_students_changed:
-                self.on_students_changed()
+        ttk.Button(f, text="✓ بدء المحاضرة", command=start).pack(fill=tk.X, pady=4)
+        if active:
+            ttk.Button(f, text="✗ إنهاء + تسجيل الغياب", command=end, width=20).pack(fill=tk.X, pady=4)
         else:
-            messagebox.showerror("خطأ", "فشل التحويل")
+            ttk.Button(f, text="✗ إنهاء + تسجيل الغياب", command=end, state='disabled', width=20).pack(fill=tk.X, pady=4)
 
     def open_manual_edit(self) -> None:
         students = self.db.get_all_students_v2()
         if not students:
             messagebox.showwarning("تنبيه", "لا يوجد طلاب")
             return
-        names = [s["name"] for s in students]
-        name = simpledialog.askstring("تعديل", f"اسم الطالب:\n{names[:5]}...")
-        if not name:
-            return
-        st = self.db.get_student_by_name_v2(name) or self.db.get_student_by_name(name)
-        if not st:
-            return
-        status = simpledialog.askstring(
-            "الحالة",
-            "present / late / absent / excused",
-            initialvalue="present",
-        )
-        if status not in ("present", "late", "absent", "excused"):
-            return
-        reason = simpledialog.askstring("سبب (اختياري)", "") or ""
-        ok, msg = self.db.set_manual_attendance_status(
-            st["id"], date.today().isoformat(), status, reason=reason
-        )
-        messagebox.showinfo("نتيجة", f"{msg}" if ok else f"فشل: {msg}")
+
+        win = tk.Toplevel(self.root)
+        win.title("تعديل الحضور اليدوي")
+        win.geometry("600x400")
+
+        main = ttk.Frame(win, padding=8)
+        main.pack(fill=tk.BOTH, expand=True)
+
+        left = ttk.Frame(main)
+        left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        right = ttk.Frame(main, width=220)
+        right.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Scrollable list of students
+        list_frame = ttk.Frame(left)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        lb = tk.Listbox(list_frame, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=lb.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        lb.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        student_map = {}
+        for s in students:
+            display = f"{s.get('name')} ({s.get('student_code') or '-'}) {s.get('section') or ''}"
+            lb.insert(tk.END, display)
+            student_map[display] = s
+
+        # Right side controls
+        ttk.Label(right, text="الحالة:").pack(anchor=tk.W, pady=(8,2))
+        status_var = tk.StringVar(value="present")
+        status_cb = ttk.Combobox(right, textvariable=status_var, values=["present", "late", "absent", "excused"])
+        status_cb.pack(fill=tk.X, pady=2)
+
+        ttk.Label(right, text="سبب (اختياري):").pack(anchor=tk.W, pady=(8,2))
+        reason_e = ttk.Entry(right)
+        reason_e.pack(fill=tk.X, pady=2)
+
+        def on_save():
+            sel = lb.curselection()
+            if not sel:
+                messagebox.showwarning("تنبيه", "اختاري طالباً من القائمة")
+                return
+            display = lb.get(sel[0])
+            st = student_map.get(display)
+            if not st:
+                messagebox.showerror("خطأ", "طالب غير معروف")
+                return
+            status = status_var.get()
+            reason = reason_e.get().strip() or None
+            time_str = None
+            if status in ("present", "late"):
+                time_str = datetime.now().strftime("%H:%M:%S")
+            ok, msg = self.db.set_manual_attendance_status(
+                st["id"], date.today().isoformat(), status, time_str, reason=reason, lecture_id=self.service.active_lecture_id
+            )
+            if ok:
+                messagebox.showinfo("تم", f"تم تحديث الحالة: {status}")
+                if self.on_students_changed:
+                    self.on_students_changed()
+            else:
+                messagebox.showerror("فشل", f"فشل الحفظ: {msg}")
+
+        def on_double(ev):
+            on_save()
+
+        ttk.Button(right, text="حفظ التعديل", command=on_save).pack(fill=tk.X, pady=8)
+        lb.bind("<Double-1>", on_double)
+
+        # allow keyboard search focus
+        lb.focus_set()
 
     def open_register_full(self, capture_frame_fn) -> None:
         """Register student with metadata from camera callback."""
@@ -269,57 +275,6 @@ class AttendanceUI:
         ttk.Button(win, text="تحديث", command=refresh).pack(pady=4)
         refresh()
 
-    def export_report_dialog(self) -> None:
-        report = self.service.export_absence_report()
-        win = tk.Toplevel(self.root)
-        win.title(f"تقرير {report['date']}")
-        win.geometry("560x420")
-        text = tk.Text(win, wrap=tk.WORD)
-        text.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
-        t = report["totals"]
-        text.insert(tk.END, f"ملخص: حاضر {t.get('present')} | متأخر {t.get('late')} | غائب {t.get('absent')}\n\n")
-        text.insert(tk.END, f"غائبون ({len(report['absent_list'])}):\n")
-        for s in report["absent_list"]:
-            text.insert(tk.END, f"  - {s['name']} ({s.get('student_code','')})\n")
-        text.insert(tk.END, f"\nمتأخرون ({len(report['late_list'])}):\n")
-        for s in report["late_list"]:
-            text.insert(tk.END, f"  - {s['name']}\n")
-
-        btn_row = ttk.Frame(win)
-        btn_row.pack(pady=6)
-
-        def save_pdf():
-            path = filedialog.asksaveasfilename(
-                defaultextension=".pdf",
-                filetypes=[("PDF", "*.pdf")],
-                initialfile=f"attendance_{report['date']}.pdf",
-            )
-            if not path:
-                return
-            ok, result = self.service.export_report_pdf(
-                report["date"], output_path=Path(path)
-            )
-            if ok:
-                messagebox.showinfo("PDF", f"تم الحفظ:\n{result}")
-                if messagebox.askyesno("فتح", "فتح الملف الآن؟"):
-                    os.startfile(result)
-            else:
-                messagebox.showerror("PDF", result)
-
-        ttk.Button(btn_row, text="تصدير PDF", command=save_pdf).pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_row, text="PDF سريع (data/reports)", command=self._quick_export_pdf).pack(
-            side=tk.LEFT, padx=6
-        )
-
-    def _quick_export_pdf(self) -> None:
-        ok, result = self.service.export_report_pdf()
-        if ok:
-            messagebox.showinfo("PDF", f"تم الحفظ:\n{result}")
-            if messagebox.askyesno("فتح", "فتح الملف؟"):
-                os.startfile(result)
-        else:
-            messagebox.showerror("PDF", result)
-
     def open_email_settings(self) -> None:
         from core.email_service import load_email_config, save_email_config, ensure_email_config_template
 
@@ -332,49 +287,89 @@ class AttendanceUI:
         f.pack(fill=tk.BOTH, expand=True)
 
         fields = {}
-        rows = [
-            ("تفعيل البريد (true/false)", "enabled", str(cfg.get("enabled", False)).lower()),
-            ("SMTP Host", "smtp_host", cfg.get("smtp_host", "")),
-            ("SMTP Port", "smtp_port", str(cfg.get("smtp_port", 587))),
-            ("TLS (true/false)", "use_tls", str(cfg.get("use_tls", True)).lower()),
-            ("اسم المستخدم", "username", cfg.get("username", "")),
-            ("كلمة المرور (أو SMTP_PASSWORD في .env)", "password", "********" if cfg.get("password") else ""),
-            ("البريد المرسل", "from_address", cfg.get("from_address", "")),
-            ("اسم المرسل", "from_name", cfg.get("from_name", "")),
-            ("مشرفون (فاصلة بينهم)", "admin_recipients", ",".join(cfg.get("admin_recipients", []))),
-            ("إرسال عند إنهاء المحاضرة", "notify_on_lecture_end", str(cfg.get("notify_on_lecture_end", True)).lower()),
-            ("إبلاغ الطلاب الغائبين", "notify_students_absent", str(cfg.get("notify_students_absent", False)).lower()),
-            ("إبلاغ الطلاب المتأخرين", "notify_students_late", str(cfg.get("notify_students_late", False)).lower()),
-        ]
-        for label, key, val in rows:
-            ttk.Label(f, text=label).pack(anchor=tk.W)
-            e = ttk.Entry(f, width=50)
-            e.insert(0, val)
-            e.pack(fill=tk.X, pady=2)
-            fields[key] = e
+        bool_vars = {}
+
+        # Enabled checkbox
+        bool_vars["enabled"] = tk.BooleanVar(value=bool(cfg.get("enabled", False)))
+        ttk.Checkbutton(f, text="Enable email notifications", variable=bool_vars["enabled"]).pack(anchor=tk.W, pady=2)
+
+        # SMTP host and port
+        ttk.Label(f, text="SMTP Host").pack(anchor=tk.W)
+        e = ttk.Entry(f, width=50)
+        e.insert(0, cfg.get("smtp_host", ""))
+        e.pack(fill=tk.X, pady=2)
+        fields["smtp_host"] = e
+
+        ttk.Label(f, text="SMTP Port").pack(anchor=tk.W)
+        e = ttk.Entry(f, width=50)
+        e.insert(0, str(cfg.get("smtp_port", 587)))
+        e.pack(fill=tk.X, pady=2)
+        fields["smtp_port"] = e
+
+        # TLS option
+        bool_vars["use_tls"] = tk.BooleanVar(value=bool(cfg.get("use_tls", True)))
+        ttk.Checkbutton(f, text="Use TLS", variable=bool_vars["use_tls"]).pack(anchor=tk.W, pady=2)
+
+        # Credentials: use environment variables or existing config file.
+        ttk.Label(
+            f,
+            text="Credentials are kept out of the UI for security.\nUse SMTP_USERNAME/SMTP_PASSWORD in .env or edit config/email_config.json",
+            foreground="gray",
+        ).pack(anchor=tk.W, pady=4)
+
+        # From address and name
+        ttk.Label(f, text="From address").pack(anchor=tk.W)
+        e = ttk.Entry(f, width=50)
+        e.insert(0, cfg.get("from_address", ""))
+        e.pack(fill=tk.X, pady=2)
+        fields["from_address"] = e
+
+        ttk.Label(f, text="From name").pack(anchor=tk.W)
+        e = ttk.Entry(f, width=50)
+        e.insert(0, cfg.get("from_name", ""))
+        e.pack(fill=tk.X, pady=2)
+        fields["from_name"] = e
+
+        # Admin recipients
+        ttk.Label(f, text="Admin recipients (comma-separated)").pack(anchor=tk.W)
+        e = ttk.Entry(f, width=50)
+        e.insert(0, ",".join(cfg.get("admin_recipients", [])))
+        e.pack(fill=tk.X, pady=2)
+        fields["admin_recipients"] = e
+
+        # Notification toggles
+        bool_vars["notify_on_lecture_end"] = tk.BooleanVar(value=bool(cfg.get("notify_on_lecture_end", True)))
+        ttk.Checkbutton(f, text="Notify on lecture end", variable=bool_vars["notify_on_lecture_end"]).pack(anchor=tk.W, pady=2)
+
+        bool_vars["notify_students_absent"] = tk.BooleanVar(value=bool(cfg.get("notify_students_absent", False)))
+        ttk.Checkbutton(f, text="Notify absent students (if email present)", variable=bool_vars["notify_students_absent"]).pack(anchor=tk.W, pady=2)
+
+        bool_vars["notify_students_late"] = tk.BooleanVar(value=bool(cfg.get("notify_students_late", False)))
+        ttk.Checkbutton(f, text="Notify late students (if email present)", variable=bool_vars["notify_students_late"]).pack(anchor=tk.W, pady=2)
 
         def save():
             new_cfg = {
-                "enabled": fields["enabled"].get().strip().lower() in ("true", "1", "yes"),
+                "enabled": bool_vars["enabled"].get(),
                 "smtp_host": fields["smtp_host"].get().strip(),
                 "smtp_port": int(fields["smtp_port"].get().strip() or 587),
-                "use_tls": fields["use_tls"].get().strip().lower() in ("true", "1", "yes"),
-                "username": fields["username"].get().strip(),
-                "password": fields["password"].get().strip(),
+                "use_tls": bool_vars["use_tls"].get(),
+                "username": "",
+                "password": "",
                 "from_address": fields["from_address"].get().strip(),
                 "from_name": fields["from_name"].get().strip(),
                 "admin_recipients": [
                     x.strip() for x in fields["admin_recipients"].get().split(",") if x.strip()
                 ],
-                "notify_on_lecture_end": fields["notify_on_lecture_end"].get().strip().lower() in ("true", "1", "yes"),
-                "notify_students_absent": fields["notify_students_absent"].get().strip().lower() in ("true", "1", "yes"),
-                "notify_students_late": fields["notify_students_late"].get().strip().lower() in ("true", "1", "yes"),
+                "notify_on_lecture_end": bool_vars["notify_on_lecture_end"].get(),
+                "notify_students_absent": bool_vars["notify_students_absent"].get(),
+                "notify_students_late": bool_vars["notify_students_late"].get(),
             }
-            if save_email_config(new_cfg):
+            ok = save_email_config(new_cfg)
+            if ok:
                 self.service.email_notifier.reload_config()
                 messagebox.showinfo("تم", "تم حفظ إعدادات البريد")
             else:
-                messagebox.showerror("خطأ", "فشل الحفظ")
+                messagebox.showerror("خطأ", "فشل الحفظ — تحقق من صلاحيات المجلد config")
 
         def test():
             ok, msg = self.service.send_test_email()
@@ -388,12 +383,28 @@ class AttendanceUI:
             foreground="gray",
         ).pack(pady=8)
 
+    def _quick_export_pdf(self) -> None:
+        ok, result = self.service.export_report_pdf(lecture_id=self.service.active_lecture_id)
+        if ok:
+            messagebox.showinfo("PDF", f"تم إنشاء ملف PDF:\n{result}")
+        else:
+            if "reportlab" in result.lower():
+                messagebox.showerror(
+                    "PDF",
+                    f"{result}\n\nلتثبيت ReportLab، نفّذ:\npip install reportlab",
+                )
+            else:
+                messagebox.showerror("PDF", result)
+
     def send_email_report_dialog(self) -> None:
         include = messagebox.askyesno(
             "إرسال بريد",
             "هل تُرسل نسخة للطلاب (الغائب/المتأخر) إن وُجد بريدهم؟",
         )
-        ok, msg = self.service.send_email_report(include_students=include)
+        ok, msg = self.service.send_email_report(
+            include_students=include,
+            lecture_id=self.service.active_lecture_id,
+        )
         if ok:
             messagebox.showinfo("بريد", msg)
         else:

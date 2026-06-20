@@ -162,18 +162,11 @@ class SimpleMySQLAttendanceGUI:
         row2 = ttk.Frame(self.main_frame)
         row2.pack(pady=6)
         ttk.Button(row2, text="بدء/إنهاء محاضرة", command=self.attendance_ui.open_lecture_session).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="لوحة حية", command=self.attendance_ui.open_live_board).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="تحويل temp → طالب", command=self._promote_unknown).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="تعديل يدوي", command=self.attendance_ui.open_manual_edit).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="جدول الحصص", command=self.attendance_ui.open_schedule_manager).pack(side=tk.LEFT, padx=4)
-        ttk.Button(row2, text="تقرير غياب", command=self.attendance_ui.export_report_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="تصدير PDF", command=self.attendance_ui._quick_export_pdf).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="إرسال إيميل", command=self.attendance_ui.send_email_report_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="إعدادات البريد", command=self.attendance_ui.open_email_settings).pack(side=tk.LEFT, padx=4)
         ttk.Button(row2, text="عرض الحضور", command=self.show_attendance).pack(side=tk.LEFT, padx=4)
-
-    def _promote_unknown(self):
-        self.attendance_ui.open_promote_unknown(self.face_capture, self.load_known_faces)
 
     def _register_full(self):
         self.attendance_ui.open_register_full(self._capture_for_registration)
