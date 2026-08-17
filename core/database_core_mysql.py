@@ -980,9 +980,9 @@ class MySQLAttendanceDatabase(AttendanceDBExtensions):
             with self.get_connection() as conn:
                 cursor = conn.cursor(dictionary=True)
                 cursor.execute('''
-                    SELECT s.name, a.time, a.image_path, a.timestamp, a.emotion, 
-                           a.emotion_confidence, a.spoofing_score, a.is_real_face
-
+                    SELECT s.name, a.time, a.image_path, a.timestamp, a.emotion,
+                           a.emotion_confidence, a.spoofing_score, a.is_real_face,
+                           a.attendance_status
                     FROM attendance a
                     JOIN students s ON a.student_id = s.id
                     WHERE a.date = %s

@@ -68,15 +68,27 @@ def dashboard():
             students = db.get_all_students()
             
             total_students = len(students)
-            # Count UNIQUE students present (not duplicate records)
-            present_student_names = set(record['name'] for record in attendance_records)
+            # Count by attendance_status field
+            present_student_names = set(
+                r['name'] for r in attendance_records
+                if r.get('attendance_status') in ('present', 'late')
+            )
+            absent_student_names = set(
+                r['name'] for r in attendance_records
+                if r.get('attendance_status') == 'absent'
+            )
             present_students = len(present_student_names)
-            absent_students = total_students - present_students
+            absent_students = len(absent_student_names)
+            # fallback: students with no record at all also count as absent
+            if absent_students == 0 and total_students > present_students:
+                absent_students = total_students - present_students
             attendance_rate = (present_students / total_students * 100) if total_students > 0 else 0
             
-            # Emotion summary
+            # Emotion summary (present/late only)
             emotion_counts = {}
             for record in attendance_records:
+                if record.get('attendance_status') not in ('present', 'late'):
+                    continue
                 emotion = record.get('emotion', 'neutral')
                 emotion_counts[emotion] = emotion_counts.get(emotion, 0) + 1
             
