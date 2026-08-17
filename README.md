@@ -1,160 +1,81 @@
-# Smart Face Recognition Attendance System
+# Face Recognition Attendance System
 
-نظام حضور وغياب للطلاب بالتعرف على الوجه، مع واجهة سطح مكتب (GUI) ولوحة تحكم ويب.
+Automated student attendance using real-time facial recognition, with a desktop GUI and a live web dashboard.
+
+> Year 2 Capstone Project
 
 ---
 
-## هيكل المشروع
+## Features
+
+- Real-time face detection and recognition via OpenCV
+- Anti-spoofing and mask detection
+- Emotion detection during sessions
+- Lecture session management (start → track → auto-mark absences on end)
+- Live web dashboard with attendance stats and charts
+- PDF report export and automated email notifications
+- MySQL backend with a REST API (Flask)
+
+---
+
+## Project Structure
 
 ```
 Face-Recognition/
-├── core/                    # قاعدة البيانات، الذكاء الاصطناعي، مسارات الملفات
-│   ├── database_core_mysql.py
-│   ├── features_ai_advanced.py
-│   ├── face_capture_manager.py
-│   ├── mysql_config.py
-│   └── paths.py
-├── gui/                     # تطبيق الكاميرا (Tkinter)
-│   ├── gui_simple_mysql.py  # الواجهة الرئيسية
-│   ├── gui_basic_mysql.py
-│   ├── settings_panel.py
-│   └── screenshot_capture.py
-├── web/                     # لوحة التحكم (Flask)
-│   ├── dashboard_final.py
-│   ├── launcher_dashboard_mysql.py
-│   ├── frontend/
-│   └── templates/
-├── data/                    # صور الوجوه والحضور
-│   ├── known_faces/         # طالب معروف → مجلد باسمه
-│   ├── unknown_faces/       # وجه جديد → temp_001, temp_002, ...
-│   └── attendance_images/
-├── config/
-│   └── system_settings.json
-├── start_mysql_app.py       # تشغيل GUI
-├── run_gui.py
-├── run_dashboard.py         # تشغيل الويب
+├── core/          # Database, AI models, business logic
+├── gui/           # Desktop app (Tkinter)
+├── web/           # Web dashboard (Flask) + frontend assets
+├── data/          # Face images and attendance snapshots
+├── config/        # Email and settings config
+├── run_gui.py     # Launch desktop app
 └── setup_database_mysql.py
 ```
 
 ---
 
-## سلوك الكاميرا
+## Getting Started
 
-| الحالة | ماذا يحدث |
-|--------|-----------|
-| طالب مسجّل مسبقاً | `known_faces/<الاسم>/` + حضور (أو **متأخر** بعد بدء المحاضرة) + انصراف عند تكرار الظهور |
-| شخص جديد | `unknown_faces/temp_XXX/` — ثم **تحويل temp → طالب** من الواجهة |
-| تسجيل يدوي | تسجيل عادي أو **تسجيل بيانات كاملة** (رقم جامعي، شعبة، سنة، مجموعة) |
+**Requirements:** Python 3.10+, MySQL (e.g. XAMPP)
 
-اضغط **q** في نافذة الكاميرا للإغلاق.
+```bash
+pip install -r requirements.txt
+```
 
-## ميزات الحضور والغياب (v2)
-
-- **جلسة محاضرة**: بدء → تسجيل الحاضرين → إنهاء → غياب تلقائي لمن لم يظهر
-- **لوحة حية**: حاضر / متأخر / غائب / معذور
-- **تعديل يدوي** للحالة (present, late, absent, excused)
-- **جدول حصص** (`class_schedule`)
-- **Anti-spoofing** عند التسجيل (رفض الصور الوهمية)
-- **تقرير غياب** من الواجهة والويب
-
-### واجهة GUI — أزرار إضافية
-
-| الزر | الوظيفة |
-|------|---------|
-| بدء/إنهاء محاضرة | جلسة + غياب آلي |
-| لوحة حية | متابعة لحظية |
-| تحويل temp → طالب | ربط مجهول باسم حقيقي |
-| تعديل يدوي | تصحيح حضور/غياب |
-| جدول الحصص | إضافة مواعيد |
-| تقرير غياب | قائمة الغائبين والمتأخرين |
-
-### API الويب (بعد تشغيل الداشبورد)
-
-- `GET /api/attendance/board?date=YYYY-MM-DD`
-- `GET /api/attendance/report?date=YYYY-MM-DD`
-- `POST /api/lecture/start` — JSON: `name`, `course_code`, `section`, `late_threshold_minutes`
-- `POST /api/lecture/end`
-- `POST /api/attendance/manual` — `student_id`, `status`, `reason`
-- `GET/POST /api/schedule`
-- `GET /api/students?section=...`
-
-إعدادات التأخير والكمامة: `core/attendance_settings.json`
-
----
-
-## إشعارات البريد الإلكتروني
-
-### الإعداد (Gmail مثال)
-
-1. من حساب Google: **App Password** (كلمة مرور التطبيق)
-2. انسخ `.env.example` إلى `.env` واملأ:
-   ```
-   SMTP_USERNAME=your@gmail.com
-   SMTP_PASSWORD=xxxx xxxx xxxx xxxx
-   SMTP_FROM=your@gmail.com
-   ```
-3. من الواجهة: **إعدادات البريد** → `enabled` = `true` → أضف مشرفين في `admin_recipients`
-4. **إرسال رسالة تجريبية** للتأكد
-
-### متى يُرسل البريد؟
-
-| الحدث | تلقائي |
-|--------|--------|
-| إنهاء المحاضرة | نعم (إن `notify_on_lecture_end`) |
-| زر **إرسال إيميل** | تقرير يدوي لليوم |
-
-التقرير يتضمن: حاضر / متأخر / غائب / معذور + قائمة الأسماء.
-
-### إيميل الطالب (اختياري)
-
-عند التسجيل أدخل **البريد** للطالب. فعّل في الإعدادات:
-- `notify_students_absent` — إيميل للغائبين
-- `notify_students_late` — إيميل للمتأخرين
-
-### تصدير PDF
-
-- من الواجهة: **تصدير PDF** (حفظ سريع في `data/reports/`) أو من نافذة **تقرير غياب** → اختيار مكان الحفظ
-- من الويب: `GET /api/attendance/report/pdf?date=2026-05-21`
-- يتطلب: `pip install reportlab`
-
-### API
-
-- `POST /api/email/test` — رسالة تجريبية
-- `POST /api/email/report` — `{"date":"2026-05-21","include_students":false}`
-- `GET /api/email/config` — الإعدادات (بدون كلمة المرور)
-
----
-
-## التشغيل
-
-### 1) قاعدة البيانات (مرة واحدة)
+**1. Initialize the database (once)**
 ```bash
 python setup_database_mysql.py
 ```
 
-### 2) واجهة الكاميرا (GUI)
+**2. Run the desktop app**
 ```bash
-python start_mysql_app.py
+python run_gui.py
 ```
-أو: `python run_gui.py`
 
-### 3) لوحة التحكم (ويب)
+**3. Run the web dashboard**
 ```bash
-python run_dashboard.py
+python web/dashboard_final.py
 ```
-ثم افتح: http://127.0.0.1:5000
+Then open: http://localhost:5000
 
 ---
 
-## المتطلبات
+## API Endpoints
 
-- Python 3.10 أو 3.11 (مُوصى به لـ `face_recognition`)
-- MySQL (مثل XAMPP)
-- `pip install -r requirements.txt`
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/attendance/board?date=YYYY-MM-DD` | Attendance board for a date |
+| POST | `/api/lecture/start` | Start a lecture session |
+| POST | `/api/lecture/end` | End session and auto-mark absences |
+| POST | `/api/attendance/manual` | Manually update attendance status |
+| GET | `/api/attendance/report/pdf?date=YYYY-MM-DD` | Export PDF report |
+| POST | `/api/email/report` | Send attendance report by email |
+
+Full interactive docs available at `/apidocs` (Swagger).
 
 ---
 
-## ملاحظات
+## Configuration
 
-- الملفات القديمة في جذر المشروع (`database_core_mysql.py`, …) مجرد جسور توافق — استخدم مجلدات `core/` و `gui/` و `web/`.
-- إعدادات MySQL في `core/mysql_config.py`.
+- **Database:** Edit `mysql_config.py` (host, user, password, database)
+- **Email:** Copy `.env.example` to `.env` and fill in SMTP credentials
+- **Attendance settings** (late threshold, anti-spoofing): `core/attendance_settings.json`
